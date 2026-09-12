@@ -1,13 +1,21 @@
 {
   "name": "dominance-market-radar",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "DOMINANCE adaptive market intelligence radar",
+  "description": "DOMINANCE adaptive market intelligence operating system",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
   "engines": { "node": ">=20" },
   "dependencies": {
+    "bcryptjs": "^3.0.2",
     "cheerio": "^1.0.0",
-    "express": "^4.21.2"
+    "connect-pg-simple": "^10.0.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-session": "^1.18.1",
+    "helmet": "^8.1.0",
+    "otplib": "^12.0.1",
+    "pg": "^8.16.3",
+    "qrcode": "^1.5.4"
   }
 }
