@@ -18,7 +18,7 @@ app.use(express.json({limit:'256kb'}));
 
 const PORT=process.env.PORT||3000;
 const MAX_PAGES=Number(process.env.MAX_CRAWL_PAGES||8);
-const UA='DOMINANCE-Market-Radar/0.5 (+https://www.weblogixgroup.com)';
+const UA='DOMINANCE-Market-Radar/0.7 (+https://www.weblogixgroup.com)';
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const SESSION_SECRET=process.env.SESSION_SECRET||process.env.SECRET_KEY||'';
 const RESEND_API_KEY=process.env.RESEND_API_KEY||'';
@@ -63,7 +63,64 @@ async function ensureAuthSchema(){
    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
  )`);
 }
-ensureAuthSchema().catch(e=>console.error('Auth schema error',e));
+async function ensurePersistenceSchema(){
+ if(!pool)return;
+ await pool.query(`CREATE TABLE IF NOT EXISTS dominance_accounts (
+   id BIGSERIAL PRIMARY KEY,
+   owner_user_id BIGINT NOT NULL REFERENCES dominance_users(id) ON DELETE CASCADE,
+   account_key TEXT NOT NULL,
+   company_name TEXT NOT NULL,
+   website TEXT NOT NULL,
+   industry_key TEXT,
+   industry_name TEXT,
+   analysis JSONB NOT NULL DEFAULT '{}'::jsonb,
+   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+   UNIQUE(owner_user_id,account_key)
+ )`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS dominance_connections (
+   id BIGSERIAL PRIMARY KEY,
+   account_id BIGINT NOT NULL REFERENCES dominance_accounts(id) ON DELETE CASCADE,
+   provider_key TEXT NOT NULL,
+   provider_name TEXT NOT NULL,
+   connection_type TEXT NOT NULL,
+   status TEXT NOT NULL DEFAULT 'not_configured',
+   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+   last_sync_at TIMESTAMPTZ,
+   last_error TEXT,
+   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+   UNIQUE(account_id,provider_key)
+ )`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS dominance_activity (
+   id BIGSERIAL PRIMARY KEY,
+   account_id BIGINT REFERENCES dominance_accounts(id) ON DELETE CASCADE,
+   user_id BIGINT REFERENCES dominance_users(id) ON DELETE SET NULL,
+   event_type TEXT NOT NULL,
+   module TEXT,
+   details JSONB NOT NULL DEFAULT '{}'::jsonb,
+   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+ )`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS dominance_worker_state (
+   worker_key TEXT PRIMARY KEY,
+   last_heartbeat_at TIMESTAMPTZ,
+   last_run_at TIMESTAMPTZ,
+   status TEXT,
+   details JSONB NOT NULL DEFAULT '{}'::jsonb
+ )`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS dominance_scan_runs (
+   id BIGSERIAL PRIMARY KEY,
+   account_id BIGINT NOT NULL REFERENCES dominance_accounts(id) ON DELETE CASCADE,
+   scan_type TEXT NOT NULL,
+   source_key TEXT,
+   status TEXT NOT NULL,
+   summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+   started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+   completed_at TIMESTAMPTZ
+ )`);
+}
+ensureAuthSchema().then(ensurePersistenceSchema).catch(e=>console.error('Schema error',e));
 
 function requireDb(req,res,next){if(!pool)return res.status(503).json({ok:false,error:'Authentication database is not configured.'});next()}
 function requireAuth(req,res,next){if(req.session&&req.session.userId)return next();if(req.path.startsWith('/api/'))return res.status(401).json({ok:false,error:'Authentication required'});return res.redirect('/login.html')}
@@ -80,8 +137,10 @@ async function sendEmail(to,subject,html){
  if(!r.ok){console.error('Resend email error',r.status,await r.text());return false}
  return true;
 }
+async function activeAccount(userId){const r=await pool.query('SELECT * FROM dominance_accounts WHERE owner_user_id=$1 AND is_active=TRUE ORDER BY updated_at DESC LIMIT 1',[userId]);return r.rows[0]||null}
+async function logActivity(userId,accountId,eventType,module,details={}){if(!pool)return;await pool.query('INSERT INTO dominance_activity(account_id,user_id,event_type,module,details) VALUES($1,$2,$3,$4,$5::jsonb)',[accountId||null,userId||null,eventType,module||null,JSON.stringify(details)]).catch(()=>{})}
 
-app.get('/api/health',async(_,res)=>{let db=false;try{if(pool){await pool.query('SELECT 1');db=true}}catch{}res.json({ok:true,service:'dominance-market-radar',website_analyzer:true,industry_detection:true,adaptive_layers:true,authentication:true,totp_2fa:'optional',password_recovery:true,database_connected:db,email_recovery_configured:!!RESEND_API_KEY,session_secret_configured:!!SESSION_SECRET})});
+app.get('/api/health',async(_,res)=>{let db=false,worker=null;try{if(pool){await pool.query('SELECT 1');db=true;const w=await pool.query("SELECT last_heartbeat_at,status,details FROM dominance_worker_state WHERE worker_key='intelligence-worker'");worker=w.rows[0]||null}}catch{}res.json({ok:true,service:'dominance-market-radar',website_analyzer:true,industry_detection:true,adaptive_layers:true,authentication:true,totp_2fa:'optional',password_recovery:true,persistent_accounts:true,background_worker:worker,database_connected:db,email_recovery_configured:!!RESEND_API_KEY,session_secret_configured:!!SESSION_SECRET})});
 app.get('/api/auth/status',requireDb,async(req,res)=>{await ensureAuthSchema();const n=await userCount();res.json({ok:true,setup_required:n===0,authenticated:!!req.session.userId,recovery_email_enabled:!!RESEND_API_KEY,two_factor_optional:true})});
 
 app.post('/api/auth/setup/start',setupLimiter,requireDb,async(req,res)=>{try{await ensureAuthSchema();const email=normalizeEmail(req.body.email),password=String(req.body.password||''),recoveryEmail=normalizeEmail(req.body.recovery_email||email),enable2fa=req.body.enable_2fa!==false;if(await userCount()>0)return res.status(409).json({ok:false,error:'Initial administrator already exists.'});if(!/^\S+@\S+\.\S+$/.test(email)||!/^\S+@\S+\.\S+$/.test(recoveryEmail))return res.status(400).json({ok:false,error:'Enter a valid email address.'});if(!goodPassword(password))return res.status(400).json({ok:false,error:'Password must be at least 12 characters and contain upper-case, lower-case and a number.'});const passwordHash=await bcrypt.hash(password,12);if(!enable2fa){const r=await pool.query('INSERT INTO dominance_users(email,password_hash,role,totp_secret,totp_enabled,recovery_hashes,recovery_email,last_login_at) VALUES($1,$2,$3,NULL,FALSE,$4::jsonb,$5,NOW()) RETURNING id,role',[email,passwordHash,'admin','[]',recoveryEmail]);req.session.userId=r.rows[0].id;req.session.role=r.rows[0].role;return res.json({ok:true,requires_2fa_setup:false,authenticated:true})}const secret=authenticator.generateSecret(),recovery=newRecoveryCodes(),recoveryHashes=await hashRecovery(recovery);await pool.query('INSERT INTO dominance_users(email,password_hash,role,totp_secret,totp_enabled,recovery_hashes,recovery_email) VALUES($1,$2,$3,$4,FALSE,$5::jsonb,$6)',[email,passwordHash,'admin',secret,JSON.stringify(recoveryHashes),recoveryEmail]);const otpauth=authenticator.keyuri(email,'DOMINANCE',secret),qr=await QRCode.toDataURL(otpauth,{margin:1,width:240});req.session.pendingSetupEmail=email;res.json({ok:true,email,requires_2fa_setup:true,qr,manual_secret:secret,recovery_codes:recovery})}catch(e){console.error(e);res.status(500).json({ok:false,error:'Unable to initialize administrator.'})}});
@@ -96,6 +155,14 @@ app.post('/api/auth/reset-password',recoveryLimiter,requireDb,async(req,res)=>{t
 
 app.get('/api/auth/me',requireAuth,requireDb,async(req,res)=>{const r=await pool.query('SELECT id,email,recovery_email,role,totp_enabled,last_login_at FROM dominance_users WHERE id=$1',[req.session.userId]);res.json({ok:true,user:r.rows[0]||null})});
 app.post('/api/auth/logout',(req,res)=>req.session.destroy(()=>{res.clearCookie('connect.sid');res.json({ok:true})}));
+
+app.get('/api/accounts/active',requireAuth,requireDb,async(req,res)=>{try{await ensurePersistenceSchema();const a=await activeAccount(req.session.userId);res.json({ok:true,account:a})}catch(e){res.status(500).json({ok:false,error:'Unable to load account.'})}});
+app.post('/api/accounts/active',requireAuth,requireDb,async(req,res)=>{try{await ensurePersistenceSchema();const b=req.body||{},accountKey=String(b.id||b.account_key||'acct_'+Date.now()),company=String(b.company_name||'').trim(),website=String(b.website||'').trim();if(!company||!website)return res.status(400).json({ok:false,error:'Company name and website are required.'});await pool.query('UPDATE dominance_accounts SET is_active=FALSE WHERE owner_user_id=$1',[req.session.userId]);const r=await pool.query(`INSERT INTO dominance_accounts(owner_user_id,account_key,company_name,website,industry_key,industry_name,analysis,is_active) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,TRUE) ON CONFLICT(owner_user_id,account_key) DO UPDATE SET company_name=EXCLUDED.company_name,website=EXCLUDED.website,industry_key=EXCLUDED.industry_key,industry_name=EXCLUDED.industry_name,analysis=EXCLUDED.analysis,is_active=TRUE,updated_at=NOW() RETURNING *`,[req.session.userId,accountKey,company,website,b.industry_key||null,b.industry_name||null,JSON.stringify(b.analysis||{})]);await logActivity(req.session.userId,r.rows[0].id,'account_saved','os',{company_name:company,website});res.json({ok:true,account:r.rows[0]})}catch(e){console.error(e);res.status(500).json({ok:false,error:'Unable to save account.'})}});
+app.post('/api/accounts/active/clear',requireAuth,requireDb,async(req,res)=>{try{const a=await activeAccount(req.session.userId);await pool.query('UPDATE dominance_accounts SET is_active=FALSE,updated_at=NOW() WHERE owner_user_id=$1',[req.session.userId]);await logActivity(req.session.userId,a?.id,'account_deactivated','os',{});res.json({ok:true})}catch(e){res.status(500).json({ok:false,error:'Unable to switch account.'})}});
+app.get('/api/connections',requireAuth,requireDb,async(req,res)=>{try{const a=await activeAccount(req.session.userId);if(!a)return res.json({ok:true,connections:[]});const r=await pool.query('SELECT provider_key,provider_name,connection_type,status,metadata,last_sync_at,last_error,updated_at FROM dominance_connections WHERE account_id=$1 ORDER BY provider_name',[a.id]);res.json({ok:true,connections:r.rows})}catch(e){res.status(500).json({ok:false,error:'Unable to load data connections.'})}});
+app.post('/api/connections/:provider',requireAuth,requireDb,async(req,res)=>{try{const a=await activeAccount(req.session.userId);if(!a)return res.status(400).json({ok:false,error:'Create or select a company account first.'});const key=String(req.params.provider||'').toUpperCase(),b=req.body||{},name=String(b.provider_name||key),type=String(b.connection_type||'metadata'),status=String(b.status||'configured');const metadata=b.metadata&&typeof b.metadata==='object'?b.metadata:{};const r=await pool.query(`INSERT INTO dominance_connections(account_id,provider_key,provider_name,connection_type,status,metadata) VALUES($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT(account_id,provider_key) DO UPDATE SET provider_name=EXCLUDED.provider_name,connection_type=EXCLUDED.connection_type,status=EXCLUDED.status,metadata=EXCLUDED.metadata,updated_at=NOW() RETURNING provider_key,provider_name,connection_type,status,metadata,last_sync_at,last_error,updated_at`,[a.id,key,name,type,status,JSON.stringify(metadata)]);await logActivity(req.session.userId,a.id,'connection_saved','admin',{provider:key,status});res.json({ok:true,connection:r.rows[0]})}catch(e){console.error(e);res.status(500).json({ok:false,error:'Unable to save connection.'})}});
+app.get('/api/activity',requireAuth,requireDb,async(req,res)=>{try{const a=await activeAccount(req.session.userId);if(!a)return res.json({ok:true,activity:[]});const r=await pool.query('SELECT event_type,module,details,created_at FROM dominance_activity WHERE account_id=$1 ORDER BY created_at DESC LIMIT 100',[a.id]);res.json({ok:true,activity:r.rows})}catch(e){res.status(500).json({ok:false,error:'Unable to load activity.'})}});
+app.get('/api/worker/status',requireAuth,requireDb,async(req,res)=>{try{const r=await pool.query("SELECT worker_key,last_heartbeat_at,last_run_at,status,details FROM dominance_worker_state WHERE worker_key='intelligence-worker'");res.json({ok:true,worker:r.rows[0]||null})}catch(e){res.status(500).json({ok:false,error:'Unable to load worker status.'})}});
 
 const STOP=new Set(`the a an and or for to of in on with by from at as is are was were be been being this that these those your our their its we you they it can will may more less best get use using help helps into across about through over under not no yes who what where when why how company business services service solution solutions page home contact learn schedule today group digital web website`.split(/\s+/));
 function cleanUrl(input){let u=String(input||'').trim();if(!/^https?:\/\//i.test(u))u='https://'+u;const p=new URL(u);if(!['http:','https:'].includes(p.protocol))throw Error('Only http(s) URLs are supported');p.hash='';return p}
@@ -114,7 +181,7 @@ app.post('/api/analyze-site',requireAuth,async(req,res)=>{try{const start=cleanU
 app.get('/login.html',(_,res)=>res.sendFile(path.join(__dirname,'login.html')));
 app.get('/reset-password.html',(_,res)=>res.sendFile(path.join(__dirname,'reset-password.html')));
 app.get('/context.js',requireAuth,(_,res)=>res.sendFile(path.join(__dirname,'context.js')));
-const protectedPages=['/','/index.html','/os.html','/competitor.html','/campaign.html','/admin.html'];
+const protectedPages=['/','/index.html','/os.html','/competitor.html','/campaign.html','/creative.html','/admin.html'];
 for(const p of protectedPages)app.get(p,requireAuth,(req,res)=>res.sendFile(path.join(__dirname,p==='/'?'os.html':p.slice(1))));
 app.use(requireAuth,express.static(__dirname));
 app.get('*',requireAuth,(_,res)=>res.sendFile(path.join(__dirname,'os.html')));
