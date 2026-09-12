@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: dominance-market-radar
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: MAX_CRAWL_PAGES
+        value: 8
