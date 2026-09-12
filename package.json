@@ -1,13 +1,14 @@
 {
   "name": "dominance-market-radar",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "private": true,
   "description": "DOMINANCE adaptive market intelligence operating system",
-  "main": "server.js",
+  "main": "server-production.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node server-production.js",
     "migrate": "node migrate.js",
-    "postinstall": "node migrate.js"
+    "postinstall": "node migrate.js",
+    "worker": "node worker.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {
