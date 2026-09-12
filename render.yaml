@@ -20,9 +20,9 @@ services:
         value: production
       - key: MAX_CRAWL_PAGES
         value: 8
-      - key: DATABASE_URL
+      - key: postgresql://dominance_db_user:O9CVYUL4NmEWc79VT0CqzBE3CpRGOvUX@dpg-daihosp5efls73dj8710-a/dominance_db
         fromDatabase:
           name: dominance-auth-db
           property: connectionString
-      - key: SESSION_SECRET
+      - key: 165800e7f5ef9c1f4c26a92470ea793a
         generateValue: true
