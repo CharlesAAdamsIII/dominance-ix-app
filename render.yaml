@@ -1,3 +1,9 @@
+databases:
+  - name: dominance-auth-db
+    plan: starter
+    databaseName: dominance
+    user: dominance
+
 services:
   - type: web
     name: dominance-market-radar
@@ -10,5 +16,13 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
+      - key: NODE_ENV
+        value: production
       - key: MAX_CRAWL_PAGES
         value: 8
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dominance-auth-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
