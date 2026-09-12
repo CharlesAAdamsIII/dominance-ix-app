@@ -1,10 +1,10 @@
 const express = require('express');
 const cheerio = require('cheerio');
+const fs = require('fs');
 const path = require('path');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
-app.use(express.static(__dirname));
 
 const PORT = process.env.PORT || 3000;
 const MAX_PAGES = Number(process.env.MAX_CRAWL_PAGES || 8);
@@ -184,6 +184,61 @@ app.post('/api/analyze-site', async (req, res) => {
 });
 
 app.get('/api/health', (_, res) => res.json({ ok: true, service: 'dominance-market-radar', website_analyzer: true }));
+
+const clientOverride = `
+<script>
+(function(){
+  const esc = s => String(s || '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+  function setText(id, value){ const el=document.getElementById(id); if(el) el.textContent=value; }
+  function renderLiveIntent(data){
+    const wrap=document.getElementById('intents');
+    if(!wrap) return;
+    const seeds=(data.seeds||[]).slice(0,8);
+    const related=(data.related||[]).slice(0,8);
+    wrap.innerHTML = seeds.map(x=>'<span class="chip seed">'+esc(x.phrase)+'</span>').join('') + related.map(x=>'<span class="chip related">'+esc(x.phrase)+'</span>').join('');
+    setText('seedN', (data.seeds||[]).length);
+    setText('relN', (data.related||[]).length);
+    setText('riseN', '—');
+    setText('s1', (data.seeds||[]).length);
+    setText('s2', (data.related||[]).length);
+    setText('s3', '—');
+  }
+  window.analyze = async function(){
+    const input=document.getElementById('website');
+    const status=document.getElementById('siteStatus');
+    const scan=document.getElementById('scantext');
+    const url=input && input.value ? input.value.trim() : '';
+    if(!url){ if(status) status.textContent='Enter a company website first.'; return; }
+    if(status) status.textContent='Crawling website and building business intent graph…';
+    if(scan) scan.textContent='Analyzing '+url+'…';
+    try{
+      const r=await fetch('/api/analyze-site',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+      const data=await r.json();
+      if(!r.ok || !data.ok) throw new Error(data.error||'Website analysis failed');
+      renderLiveIntent(data);
+      if(status) status.textContent='Live analysis complete: '+data.pages_scanned+' pages scanned from '+data.site+'.';
+      if(scan) scan.textContent='Live intent graph loaded for '+data.site+' • '+(data.seeds||[]).length+' seed phrases • '+(data.related||[]).length+' related phrases';
+      window.__DOMINANCE_SITE_ANALYSIS__=data;
+    }catch(err){
+      if(status) status.textContent='Analysis failed: '+err.message;
+      if(scan) scan.textContent='Website analysis failed — existing demo intent remains active.';
+    }
+  };
+})();
+</script>`;
+
+function serveRadar(req, res) {
+  try {
+    const file = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+    res.type('html').send(file.replace('</body>', clientOverride + '</body>'));
+  } catch (err) {
+    res.status(500).send('Unable to load Market Radar');
+  }
+}
+
+app.get('/', serveRadar);
+app.get('/index.html', serveRadar);
+app.use(express.static(__dirname));
 app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.listen(PORT, () => console.log(`DOMINANCE listening on ${PORT}`));
