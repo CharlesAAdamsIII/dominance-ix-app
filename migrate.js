@@ -107,12 +107,87 @@ async function main(){
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
 
+    await pool.query(`CREATE TABLE IF NOT EXISTS dominance_competitor_assets (
+      id BIGSERIAL PRIMARY KEY,
+      dominance_account_id BIGINT REFERENCES dominance_accounts(id) ON DELETE CASCADE,
+      competitor_name TEXT NOT NULL,
+      competitor_domain TEXT,
+      platform TEXT NOT NULL,
+      external_asset_id TEXT,
+      asset_type TEXT NOT NULL,
+      placement TEXT,
+      headline TEXT,
+      body_copy TEXT,
+      cta TEXT,
+      destination_url TEXT,
+      media_url TEXT,
+      visual_fingerprint TEXT,
+      message_angle TEXT,
+      offer_type TEXT,
+      first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      UNIQUE(dominance_account_id,platform,competitor_name,external_asset_id)
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS dominance_competitor_asset_observations (
+      id BIGSERIAL PRIMARY KEY,
+      competitor_asset_id BIGINT NOT NULL REFERENCES dominance_competitor_assets(id) ON DELETE CASCADE,
+      observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      impression_signal NUMERIC,
+      engagement_signal NUMERIC,
+      longevity_hours NUMERIC,
+      spend_signal NUMERIC,
+      rank_signal NUMERIC,
+      placement_count INTEGER,
+      raw_metrics JSONB NOT NULL DEFAULT '{}'::jsonb
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS dominance_asset_intelligence (
+      id BIGSERIAL PRIMARY KEY,
+      dominance_account_id BIGINT REFERENCES dominance_accounts(id) ON DELETE CASCADE,
+      asset_scope TEXT NOT NULL,
+      creative_id BIGINT REFERENCES dominance_creatives(id) ON DELETE CASCADE,
+      competitor_asset_id BIGINT REFERENCES dominance_competitor_assets(id) ON DELETE CASCADE,
+      platform TEXT,
+      signal_type TEXT NOT NULL,
+      signal_state TEXT NOT NULL,
+      score NUMERIC(8,4),
+      confidence NUMERIC(5,4),
+      baseline JSONB NOT NULL DEFAULT '{}'::jsonb,
+      current_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+      evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
+      observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS dominance_asset_recommendations (
+      id BIGSERIAL PRIMARY KEY,
+      dominance_account_id BIGINT REFERENCES dominance_accounts(id) ON DELETE CASCADE,
+      platform TEXT,
+      campaign_entity_id BIGINT REFERENCES dominance_campaign_entities(id) ON DELETE SET NULL,
+      creative_id BIGINT REFERENCES dominance_creatives(id) ON DELETE SET NULL,
+      competitor_asset_id BIGINT REFERENCES dominance_competitor_assets(id) ON DELETE SET NULL,
+      recommendation_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      recommended_action JSONB NOT NULL DEFAULT '{}'::jsonb,
+      expected_impact TEXT,
+      confidence NUMERIC(5,4),
+      priority INTEGER NOT NULL DEFAULT 50,
+      status TEXT NOT NULL DEFAULT 'open',
+      auto_action_eligible BOOLEAN NOT NULL DEFAULT FALSE,
+      source_signal_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ
+    )`);
+
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_dominance_creatives_account ON dominance_creatives(account_key,platform,status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_dominance_perf_creative ON dominance_creative_performance(creative_id,observed_at)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_dominance_learning_account ON dominance_creative_learning(account_key,platform,dimension,score DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_dom_campaign_entities_tree ON dominance_campaign_entities(dominance_account_id,platform,parent_entity_id,entity_type)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_dom_creative_requests_queue ON dominance_creative_requests(status,priority DESC,created_at)`);
-    console.log('DOMINANCE campaign hierarchy + Creative Performance Graph schema ready.');
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_dom_comp_assets_account ON dominance_competitor_assets(dominance_account_id,platform,competitor_name,last_seen_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_dom_asset_intel_account ON dominance_asset_intelligence(dominance_account_id,platform,signal_type,observed_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_dom_asset_recos_queue ON dominance_asset_recommendations(dominance_account_id,status,priority DESC,created_at)`);
+    console.log('DOMINANCE campaign hierarchy + autonomous Asset Intelligence schema ready.');
   } finally {await pool.end()}
 }
 
