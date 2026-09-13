@@ -58,16 +58,19 @@ function phraseScore(p){
 }
 function industryFallbacks(a){
  const industry=String(a.industry_name||a.industry_key||'').toLowerCase();
- const common=['ai automation company','custom software development','app development company','ai consulting services','digital growth agency'];
- if(industry.includes('marketing')||industry.includes('technology'))return ['ai automation company','custom software development','healthcare marketing agency','ai consulting services','app development company'];
- if(industry.includes('health'))return ['healthcare marketing agency','healthcare software development','healthcare ai solutions','patient acquisition marketing','healthcare automation'];
- return common;
+ if(industry.includes('health'))return ['healthcare marketing','healthcare software','healthcare ai','patient acquisition','healthcare automation'];
+ if(industry.includes('marketing')||industry.includes('technology'))return ['ai automation','software development','healthcare marketing','ai consulting','app development'];
+ return ['ai automation','software development','app development','ai consulting','digital marketing'];
 }
 function accountKeywords(a){
  const source=[...(a.analysis?.seeds||[]),...(a.analysis?.related||[]),...(a.analysis?.concepts||[])].map(cleanPhrase).filter(x=>x.length>3&&!NAV_JUNK.has(x));
  const ranked=[...new Set(source)].map(p=>({p,score:phraseScore(p)})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score).map(x=>x.p);
- const merged=[...ranked,...industryFallbacks(a)];
- return [...new Set(merged)].slice(0,5);
+ const broad=industryFallbacks(a);
+ // Keep at least three broad commercial phrases so short-window geographic demand is more likely to have enough signal.
+ const selected=[];
+ for(const p of broad){if(!selected.includes(p))selected.push(p)}
+ for(const p of ranked){if(!selected.includes(p))selected.push(p)}
+ return selected.slice(0,5);
 }
 
 function responseShape(result){
@@ -76,7 +79,11 @@ function responseShape(result){
    keys:Object.keys(block||{}).slice(0,20),
    item_count:Array.isArray(block?.items)?block.items.length:0,
    item_types:Array.isArray(block?.items)?[...new Set(block.items.map(x=>x?.type||'(none)'))].slice(0,12):[],
-   first_item_keys:Array.isArray(block?.items)&&block.items[0]?Object.keys(block.items[0]).slice(0,20):[]
+   first_item_keys:Array.isArray(block?.items)&&block.items[0]?Object.keys(block.items[0]).slice(0,20):[],
+   interests_count:Array.isArray(block?.items?.[0]?.interests)?block.items[0].interests.length:0,
+   interest_value_counts:Array.isArray(block?.items?.[0]?.interests)?block.items[0].interests.slice(0,5).map(x=>Array.isArray(x?.values)?x.values.length:0):[],
+   comparison_items:Array.isArray(block?.items?.[0]?.interests_comparison?.items)?block.items[0].interests_comparison.items.length:0,
+   comparison_absolute_items:Array.isArray(block?.items?.[0]?.interests_comparison?.absolute_items)?block.items[0].interests_comparison.absolute_items.length:0
  }));
 }
 function extractSubregions(result){
@@ -90,17 +97,25 @@ function extractSubregions(result){
    if(keyword)row.keywords.add(keyword);
    byGeo.set(key,row);
  };
+ const addComparison=(comp,keywords,label)=>{
+   if(!comp?.geo_name)return;
+   const vals=(comp.values||[]).map(Number).filter(Number.isFinite);
+   if(!vals.length)return;
+   add({geo_id:comp.geo_id,geo_name:comp.geo_name,value:Math.max(...vals)},label||'combined');
+   const key=String(comp.geo_id||comp.geo_name).toLowerCase();
+   const row=byGeo.get(key);
+   if(row&&Array.isArray(keywords))keywords.forEach(k=>{if(k)row.keywords.add(k)});
+ };
  for(const block of result||[]){
    for(const item of block.items||[]){
      if(item.type&&item.type!=='subregion_interests')continue;
+     const itemKeywords=Array.isArray(item.keywords)?item.keywords:[];
      for(const interest of item.interests||[]){
        for(const v of interest.values||[])add(v,interest.keyword||'');
      }
-     for(const comp of item.interests_comparison?.absolute_items||[]){
-       const vals=(comp.values||[]).map(Number).filter(Number.isFinite);
-       if(vals.length)add({geo_id:comp.geo_id,geo_name:comp.geo_name,value:Math.max(...vals)},'combined');
-     }
-     // Some DataForSEO responses expose geographic values directly on item.values.
+     // Official DataForSEO schema nests both `items` and `absolute_items` under interests_comparison.
+     for(const comp of item.interests_comparison?.items||[])addComparison(comp,itemKeywords,'comparison');
+     for(const comp of item.interests_comparison?.absolute_items||[])addComparison(comp,itemKeywords,'absolute_comparison');
      for(const v of item.values||[])add(v,item.keyword||'');
    }
  }
