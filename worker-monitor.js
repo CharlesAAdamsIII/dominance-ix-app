@@ -1,171 +1,47 @@
 const {spawn}=require('child_process');
 const {Pool}=require('pg');
+const {processCreativeQueue}=require('./creative-queue');
 
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const DATAFORSEO_LOGIN=process.env.DATAFORSEO_LOGIN||'';
 const DATAFORSEO_PASSWORD=process.env.DATAFORSEO_PASSWORD||'';
 const INTERVAL_MS=Math.max(5,Number(process.env.WORKER_INTERVAL_MINUTES||15))*60*1000;
+const CREATIVE_INTERVAL_MS=Math.max(1,Number(process.env.CREATIVE_QUEUE_INTERVAL_MINUTES||1))*60*1000;
 const IS_PROD=process.env.NODE_ENV==='production'||!!process.env.RENDER;
 const pool=DATABASE_URL?new Pool({connectionString:DATABASE_URL,ssl:IS_PROD?{rejectUnauthorized:false}:false}):null;
-let lastRunId=null;
+let lastRunId=null,creativeBusy=false;
 
 function clamp(v,min=0,max=100){return Math.max(min,Math.min(max,v))}
 function pct(cur,prev){if(prev<=0)return cur>0?100:0;return Math.max(-1000,Math.min(1000,((cur-prev)/prev)*100))}
-function printResult(x){
- const provider=x?.provider||'UNKNOWN';
- const status=String(x?.status||'unknown').toUpperCase();
- const markets=Number(x?.market_radar?.markets||0);
- const suffix=markets?` | market signals: ${markets}`:'';
- if(x?.error) console.error(`[SOURCE] ${provider} ${status}${suffix} | ${x.error}`);
- else console.log(`[SOURCE] ${provider} ${status}${suffix}`);
-}
-
-async function inspectLatest(){
- if(!pool)return;
- try{
-   const r=await pool.query(`SELECT id,account_id,status,summary,completed_at FROM dominance_scan_runs WHERE scan_type='intelligence-cycle' ORDER BY id DESC LIMIT 1`);
-   const row=r.rows[0];
-   if(!row||row.id===lastRunId)return;
-   lastRunId=row.id;
-   const summary=row.summary||{};
-   console.log(`\n[DOMINANCE SOURCE HEALTH] run=${row.id} status=${row.status} company=${summary.company||'unknown'} completed=${row.completed_at||''}`);
-   for(const result of summary.results||[])printResult(result);
-   console.log(`[DOMINANCE SOURCE HEALTH] synced=${summary.synced??0} awaiting=${summary.awaiting_resource_selection??0} errors=${summary.errors??0}\n`);
- }catch(e){console.error('[DOMINANCE SOURCE HEALTH] monitor error:',e.message||e)}
-}
+function printResult(x){const provider=x?.provider||'UNKNOWN';const status=String(x?.status||'unknown').toUpperCase();const markets=Number(x?.market_radar?.markets||0);const suffix=markets?` | market signals: ${markets}`:'';if(x?.error)console.error(`[SOURCE] ${provider} ${status}${suffix} | ${x.error}`);else console.log(`[SOURCE] ${provider} ${status}${suffix}`)}
+async function inspectLatest(){if(!pool)return;try{const r=await pool.query(`SELECT id,account_id,status,summary,completed_at FROM dominance_scan_runs WHERE scan_type='intelligence-cycle' ORDER BY id DESC LIMIT 1`);const row=r.rows[0];if(!row||row.id===lastRunId)return;lastRunId=row.id;const summary=row.summary||{};console.log(`\n[DOMINANCE SOURCE HEALTH] run=${row.id} status=${row.status} company=${summary.company||'unknown'} completed=${row.completed_at||''}`);for(const result of summary.results||[])printResult(result);console.log(`[DOMINANCE SOURCE HEALTH] synced=${summary.synced??0} awaiting=${summary.awaiting_resource_selection??0} errors=${summary.errors??0}\n`)}catch(e){console.error('[DOMINANCE SOURCE HEALTH] monitor error:',e.message||e)}}
 
 function dataForSeoReady(){return!!(DATAFORSEO_LOGIN&&DATAFORSEO_PASSWORD)}
 function dataForSeoAuth(){return 'Basic '+Buffer.from(`${DATAFORSEO_LOGIN}:${DATAFORSEO_PASSWORD}`).toString('base64')}
-async function dataForSeoPost(path,task){
- const r=await fetch('https://api.dataforseo.com'+path,{method:'POST',headers:{Authorization:dataForSeoAuth(),'Content-Type':'application/json'},body:JSON.stringify([task])});
- const d=await r.json().catch(()=>({}));
- if(!r.ok||Number(d.status_code||0)!==20000)throw Error(d.status_message||`DataForSEO API ${r.status}`);
- const t=d.tasks?.[0];
- if(!t||Number(t.status_code||0)!==20000)throw Error(t?.status_message||'DataForSEO task failed');
- return t.result||[];
-}
-
+async function dataForSeoPost(path,task){const r=await fetch('https://api.dataforseo.com'+path,{method:'POST',headers:{Authorization:dataForSeoAuth(),'Content-Type':'application/json'},body:JSON.stringify([task])});const d=await r.json().catch(()=>({}));if(!r.ok||Number(d.status_code||0)!==20000)throw Error(d.status_message||`DataForSEO API ${r.status}`);const t=d.tasks?.[0];if(!t||Number(t.status_code||0)!==20000)throw Error(t?.status_message||'DataForSEO task failed');return t.result||[]}
 const NAV_JUNK=new Set(['contact us','about us','home','web logix group','testing and quality assurance','endpoint logic','learn more','our services','services']);
 const COMMERCIAL_HINTS=['ai','automation','software','app','application','development','marketing','seo','advertising','healthcare','cybersecurity','data','analytics','consulting','technology','digital','growth'];
 function cleanPhrase(x){return String(x?.phrase||x||'').trim().replace(/\s+/g,' ').toLowerCase()}
-function phraseScore(p){
- let score=0;
- for(const h of COMMERCIAL_HINTS)if(p.includes(h))score+=2;
- if(/company|agency|services|consulting|development|solutions|platform|provider/.test(p))score+=2;
- if(p.split(' ').length>=2&&p.split(' ').length<=5)score+=1;
- if(NAV_JUNK.has(p))score-=20;
- return score;
-}
-function industryFallbacks(a){
- const industry=String(a.industry_name||a.industry_key||'').toLowerCase();
- if(industry.includes('health'))return ['healthcare marketing','healthcare software','healthcare ai','patient acquisition','healthcare automation'];
- if(industry.includes('marketing')||industry.includes('technology'))return ['ai automation','software development','healthcare marketing','ai consulting','app development'];
- return ['ai automation','software development','app development','ai consulting','digital marketing'];
-}
-function accountKeywords(a){
- const source=[...(a.analysis?.seeds||[]),...(a.analysis?.related||[]),...(a.analysis?.concepts||[])].map(cleanPhrase).filter(x=>x.length>3&&!NAV_JUNK.has(x));
- const ranked=[...new Set(source)].map(p=>({p,score:phraseScore(p)})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score).map(x=>x.p);
- const broad=industryFallbacks(a);
- // Keep at least three broad commercial phrases so short-window geographic demand is more likely to have enough signal.
- const selected=[];
- for(const p of broad){if(!selected.includes(p))selected.push(p)}
- for(const p of ranked){if(!selected.includes(p))selected.push(p)}
- return selected.slice(0,5);
-}
+function phraseScore(p){let score=0;for(const h of COMMERCIAL_HINTS)if(p.includes(h))score+=2;if(/company|agency|services|consulting|development|solutions|platform|provider/.test(p))score+=2;if(p.split(' ').length>=2&&p.split(' ').length<=5)score+=1;if(NAV_JUNK.has(p))score-=20;return score}
+function industryFallbacks(a){const industry=String(a.industry_name||a.industry_key||'').toLowerCase();if(industry.includes('health'))return ['healthcare marketing','healthcare software','healthcare ai','patient acquisition','healthcare automation'];if(industry.includes('marketing')||industry.includes('technology'))return ['ai automation','software development','healthcare marketing','ai consulting','app development'];return ['ai automation','software development','app development','ai consulting','digital marketing']}
+function accountKeywords(a){const source=[...(a.analysis?.seeds||[]),...(a.analysis?.related||[]),...(a.analysis?.concepts||[])].map(cleanPhrase).filter(x=>x.length>3&&!NAV_JUNK.has(x));const ranked=[...new Set(source)].map(p=>({p,score:phraseScore(p)})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score).map(x=>x.p);const selected=[];for(const p of industryFallbacks(a))if(!selected.includes(p))selected.push(p);for(const p of ranked)if(!selected.includes(p))selected.push(p);return selected.slice(0,5)}
+function responseShape(result){return(result||[]).slice(0,3).map((block,i)=>({block:i,keys:Object.keys(block||{}).slice(0,20),item_count:Array.isArray(block?.items)?block.items.length:0,item_types:Array.isArray(block?.items)?[...new Set(block.items.map(x=>x?.type||'(none)'))].slice(0,12):[],first_item_keys:Array.isArray(block?.items)&&block.items[0]?Object.keys(block.items[0]).slice(0,20):[],interests_count:Array.isArray(block?.items?.[0]?.interests)?block.items[0].interests.length:0,interest_value_counts:Array.isArray(block?.items?.[0]?.interests)?block.items[0].interests.slice(0,5).map(x=>Array.isArray(x?.values)?x.values.length:0):[],comparison_items:Array.isArray(block?.items?.[0]?.interests_comparison?.items)?block.items[0].interests_comparison.items.length:0,comparison_absolute_items:Array.isArray(block?.items?.[0]?.interests_comparison?.absolute_items)?block.items[0].interests_comparison.absolute_items.length:0}))}
+function extractSubregions(result){const byGeo=new Map();const add=(v,keyword)=>{if(!v?.geo_name)return;const key=String(v.geo_id||v.geo_name).toLowerCase();const row=byGeo.get(key)||{geo_id:v.geo_id||null,geo_name:v.geo_name,values:[],keywords:new Set()};const n=Number(v.value);if(Number.isFinite(n))row.values.push(n);if(keyword)row.keywords.add(keyword);byGeo.set(key,row)};const addComparison=(comp,keywords,label)=>{if(!comp?.geo_name)return;const vals=(comp.values||[]).map(Number).filter(Number.isFinite);if(!vals.length)return;add({geo_id:comp.geo_id,geo_name:comp.geo_name,value:Math.max(...vals)},label||'combined');const key=String(comp.geo_id||comp.geo_name).toLowerCase();const row=byGeo.get(key);if(row&&Array.isArray(keywords))keywords.forEach(k=>{if(k)row.keywords.add(k)})};for(const block of result||[])for(const item of block.items||[]){if(item.type&&item.type!=='subregion_interests')continue;const itemKeywords=Array.isArray(item.keywords)?item.keywords:[];for(const interest of item.interests||[])for(const v of interest.values||[])add(v,interest.keyword||'');for(const comp of item.interests_comparison?.items||[])addComparison(comp,itemKeywords,'comparison');for(const comp of item.interests_comparison?.absolute_items||[])addComparison(comp,itemKeywords,'absolute_comparison');for(const v of item.values||[])add(v,item.keyword||'')}return[...byGeo.values()].map(x=>({geo_id:x.geo_id,geo_name:x.geo_name,value:x.values.length?Math.max(...x.values):0,keywords:[...x.keywords]}))}
+async function syncDataForSeo(){if(!pool||!dataForSeoReady())return;try{const ar=await pool.query('SELECT id,company_name,website,industry_key,industry_name,analysis FROM dominance_accounts WHERE is_active=TRUE ORDER BY updated_at DESC LIMIT 1');const a=ar.rows[0];if(!a)return;const keywords=accountKeywords(a);if(!keywords.length){console.log('[SOURCE] DATAFORSEO NO_KEYWORDS');return}console.log(`[DATAFORSEO] commercial intent set: ${keywords.join(' | ')}`);const result=await dataForSeoPost('/v3/keywords_data/dataforseo_trends/subregion_interests/live',{keywords,location_name:'United States',type:'web',time_range:'past_4_hours',tag:`dom-${a.id}-${Date.now()}`});const regions=extractSubregions(result);if(!regions.length)console.log('[DATAFORSEO SHAPE] '+JSON.stringify(responseShape(result)));const rows=[];for(const g of regions){const key=String(g.geo_id||g.geo_name).toLowerCase(),current=Number(g.value||0);const pr=await pool.query('SELECT observed_volume,velocity_pct FROM dominance_market_snapshots WHERE account_id=$1 AND geography_key=$2 AND source_key=$3 ORDER BY captured_at DESC LIMIT 1',[a.id,key,'DATAFORSEO_TRENDS']);const prior=Number(pr.rows[0]?.observed_volume||0),velocity=pct(current,prior),oldVelocity=Number(pr.rows[0]?.velocity_pct||0),acceleration=velocity-oldVelocity;const confidence=clamp(55+(pr.rowCount?20:0)+Math.min(25,current/4));const opportunity=clamp(Math.round(current*.65+clamp(50+velocity/4)*.2+clamp(50+acceleration/5)*.05+confidence*.1));const state=opportunity>=80?'surging':opportunity>=65?'rising':opportunity>=45?'active':'baseline';const metrics={keywords,matched_keywords:g.keywords,relative_popularity:current,time_range:'past_4_hours',source_note:'DataForSEO Trends relative keyword popularity by U.S. subregion. Relative interest is not absolute search count.',search_volume_available:false};await pool.query(`INSERT INTO dominance_market_snapshots(account_id,geography_key,geography_name,geography_type,region,country,source_key,observed_volume,prior_volume,velocity_pct,acceleration_pct,opportunity_score,confidence,signal_state,metrics) VALUES($1,$2,$3,'state',$3,'United States','DATAFORSEO_TRENDS',$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,[a.id,key,g.geo_name,current,prior,velocity,acceleration,opportunity,confidence,state,JSON.stringify(metrics)]);rows.push({geography_key:key,geography_name:g.geo_name,geography_type:'state',region:g.geo_name,country:'United States',source_key:'DATAFORSEO_TRENDS',observed_volume:current,search_volume:null,prior_volume:prior,velocity_pct:Math.round(velocity),acceleration_pct:Math.round(acceleration),opportunity_score:opportunity,confidence:Math.round(confidence),signal_state:state,metrics})}rows.sort((a,b)=>b.opportunity_score-a.opportunity_score);await pool.query("INSERT INTO dominance_activity(account_id,event_type,module,details) VALUES($1,'market_radar_snapshot','market_radar',$2::jsonb)",[a.id,JSON.stringify({captured_at:new Date().toISOString(),window_minutes:15,demand_window:'past_4_hours',markets:rows.slice(0,100),source_status:{DATAFORSEO_TRENDS:'observed'},keywords,explanation:'National U.S. subregion demand signals from DataForSEO Trends. Values are relative popularity, not absolute search counts.'})]);const wr=await pool.query("SELECT details FROM dominance_worker_state WHERE worker_key='intelligence-worker'");const details={...(wr.rows[0]?.details||{}),market_signals:rows.length,dataforseo_ready:true,dataforseo_markets:rows.length,dataforseo_last_sync:new Date().toISOString(),dataforseo_keywords:keywords};await pool.query("UPDATE dominance_worker_state SET details=$1::jsonb WHERE worker_key='intelligence-worker'",[JSON.stringify(details)]);console.log(`[SOURCE] DATAFORSEO SYNCED | market signals: ${rows.length} | keywords: ${keywords.join(' | ')}`)}catch(e){console.error(`[SOURCE] DATAFORSEO ERROR | ${e.message||e}`)}}
 
-function responseShape(result){
- return (result||[]).slice(0,3).map((block,i)=>({
-   block:i,
-   keys:Object.keys(block||{}).slice(0,20),
-   item_count:Array.isArray(block?.items)?block.items.length:0,
-   item_types:Array.isArray(block?.items)?[...new Set(block.items.map(x=>x?.type||'(none)'))].slice(0,12):[],
-   first_item_keys:Array.isArray(block?.items)&&block.items[0]?Object.keys(block.items[0]).slice(0,20):[],
-   interests_count:Array.isArray(block?.items?.[0]?.interests)?block.items[0].interests.length:0,
-   interest_value_counts:Array.isArray(block?.items?.[0]?.interests)?block.items[0].interests.slice(0,5).map(x=>Array.isArray(x?.values)?x.values.length:0):[],
-   comparison_items:Array.isArray(block?.items?.[0]?.interests_comparison?.items)?block.items[0].interests_comparison.items.length:0,
-   comparison_absolute_items:Array.isArray(block?.items?.[0]?.interests_comparison?.absolute_items)?block.items[0].interests_comparison.absolute_items.length:0
- }));
-}
-function extractSubregions(result){
- const byGeo=new Map();
- const add=(v,keyword)=>{
-   if(!v?.geo_name)return;
-   const key=String(v.geo_id||v.geo_name).toLowerCase();
-   const row=byGeo.get(key)||{geo_id:v.geo_id||null,geo_name:v.geo_name,values:[],keywords:new Set()};
-   const n=Number(v.value);
-   if(Number.isFinite(n))row.values.push(n);
-   if(keyword)row.keywords.add(keyword);
-   byGeo.set(key,row);
- };
- const addComparison=(comp,keywords,label)=>{
-   if(!comp?.geo_name)return;
-   const vals=(comp.values||[]).map(Number).filter(Number.isFinite);
-   if(!vals.length)return;
-   add({geo_id:comp.geo_id,geo_name:comp.geo_name,value:Math.max(...vals)},label||'combined');
-   const key=String(comp.geo_id||comp.geo_name).toLowerCase();
-   const row=byGeo.get(key);
-   if(row&&Array.isArray(keywords))keywords.forEach(k=>{if(k)row.keywords.add(k)});
- };
- for(const block of result||[]){
-   for(const item of block.items||[]){
-     if(item.type&&item.type!=='subregion_interests')continue;
-     const itemKeywords=Array.isArray(item.keywords)?item.keywords:[];
-     for(const interest of item.interests||[]){
-       for(const v of interest.values||[])add(v,interest.keyword||'');
-     }
-     // Official DataForSEO schema nests both `items` and `absolute_items` under interests_comparison.
-     for(const comp of item.interests_comparison?.items||[])addComparison(comp,itemKeywords,'comparison');
-     for(const comp of item.interests_comparison?.absolute_items||[])addComparison(comp,itemKeywords,'absolute_comparison');
-     for(const v of item.values||[])add(v,item.keyword||'');
-   }
- }
- return [...byGeo.values()].map(x=>({geo_id:x.geo_id,geo_name:x.geo_name,value:x.values.length?Math.max(...x.values):0,keywords:[...x.keywords]}));
-}
-
-async function syncDataForSeo(){
- if(!pool||!dataForSeoReady())return;
- try{
-   const ar=await pool.query('SELECT id,company_name,website,industry_key,industry_name,analysis FROM dominance_accounts WHERE is_active=TRUE ORDER BY updated_at DESC LIMIT 1');
-   const a=ar.rows[0];
-   if(!a)return;
-   const keywords=accountKeywords(a);
-   if(!keywords.length){console.log('[SOURCE] DATAFORSEO NO_KEYWORDS');return}
-   console.log(`[DATAFORSEO] commercial intent set: ${keywords.join(' | ')}`);
-   const result=await dataForSeoPost('/v3/keywords_data/dataforseo_trends/subregion_interests/live',{keywords,location_name:'United States',type:'web',time_range:'past_4_hours',tag:`dom-${a.id}-${Date.now()}`});
-   const regions=extractSubregions(result);
-   if(!regions.length)console.log('[DATAFORSEO SHAPE] '+JSON.stringify(responseShape(result)));
-   const rows=[];
-   for(const g of regions){
-     const key=String(g.geo_id||g.geo_name).toLowerCase(),current=Number(g.value||0);
-     const pr=await pool.query('SELECT observed_volume,velocity_pct FROM dominance_market_snapshots WHERE account_id=$1 AND geography_key=$2 AND source_key=$3 ORDER BY captured_at DESC LIMIT 1',[a.id,key,'DATAFORSEO_TRENDS']);
-     const prior=Number(pr.rows[0]?.observed_volume||0),velocity=pct(current,prior),oldVelocity=Number(pr.rows[0]?.velocity_pct||0),acceleration=velocity-oldVelocity;
-     const confidence=clamp(55+(pr.rowCount?20:0)+Math.min(25,current/4));
-     const opportunity=clamp(Math.round(current*.65+clamp(50+velocity/4)*.2+clamp(50+acceleration/5)*.05+confidence*.1));
-     const state=opportunity>=80?'surging':opportunity>=65?'rising':opportunity>=45?'active':'baseline';
-     const metrics={keywords,matched_keywords:g.keywords,relative_popularity:current,time_range:'past_4_hours',source_note:'DataForSEO Trends relative keyword popularity by U.S. subregion. Relative interest is not absolute search count.',search_volume_available:false};
-     await pool.query(`INSERT INTO dominance_market_snapshots(account_id,geography_key,geography_name,geography_type,region,country,source_key,observed_volume,prior_volume,velocity_pct,acceleration_pct,opportunity_score,confidence,signal_state,metrics) VALUES($1,$2,$3,'state',$3,'United States','DATAFORSEO_TRENDS',$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,[a.id,key,g.geo_name,current,prior,velocity,acceleration,opportunity,confidence,state,JSON.stringify(metrics)]);
-     rows.push({geography_key:key,geography_name:g.geo_name,geography_type:'state',region:g.geo_name,country:'United States',source_key:'DATAFORSEO_TRENDS',observed_volume:current,search_volume:null,prior_volume:prior,velocity_pct:Math.round(velocity),acceleration_pct:Math.round(acceleration),opportunity_score:opportunity,confidence:Math.round(confidence),signal_state:state,metrics});
-   }
-   rows.sort((a,b)=>b.opportunity_score-a.opportunity_score);
-   await pool.query("INSERT INTO dominance_activity(account_id,event_type,module,details) VALUES($1,'market_radar_snapshot','market_radar',$2::jsonb)",[a.id,JSON.stringify({captured_at:new Date().toISOString(),window_minutes:15,demand_window:'past_4_hours',markets:rows.slice(0,100),source_status:{DATAFORSEO_TRENDS:'observed'},keywords,explanation:'National U.S. subregion demand signals from DataForSEO Trends. Values are relative popularity, not absolute search counts.'})]);
-   const wr=await pool.query("SELECT details FROM dominance_worker_state WHERE worker_key='intelligence-worker'");
-   const details={...(wr.rows[0]?.details||{}),market_signals:rows.length,dataforseo_ready:true,dataforseo_markets:rows.length,dataforseo_last_sync:new Date().toISOString(),dataforseo_keywords:keywords};
-   await pool.query("UPDATE dominance_worker_state SET details=$1::jsonb WHERE worker_key='intelligence-worker'",[JSON.stringify(details)]);
-   console.log(`[SOURCE] DATAFORSEO SYNCED | market signals: ${rows.length} | keywords: ${keywords.join(' | ')}`);
- }catch(e){console.error(`[SOURCE] DATAFORSEO ERROR | ${e.message||e}`)}
-}
+async function runCreativeQueue(){if(!pool||creativeBusy)return;creativeBusy=true;try{const x=await processCreativeQueue(pool,{maxJobs:5});if(x.processed||x.promoted)console.log(`[CREATIVE QUEUE] cycle complete | briefs=${x.processed} | recommendations promoted=${x.promoted}`)}catch(e){console.error('[CREATIVE QUEUE] cycle error:',e.message||e)}finally{creativeBusy=false}}
 
 // Keep DataForSEO out of the child worker so we do not make duplicate paid API calls.
 const childEnv={...process.env,DATAFORSEO_LOGIN:'',DATAFORSEO_PASSWORD:''};
 const child=spawn(process.execPath,['worker.js'],{stdio:'inherit',env:childEnv});
 child.on('exit',async(code,signal)=>{console.error(`DOMINANCE worker exited code=${code} signal=${signal||''}`);if(pool)await pool.end().catch(()=>{});process.exit(code??1)});
 child.on('error',e=>console.error('Unable to start DOMINANCE worker:',e));
-
 setTimeout(inspectLatest,8000);
+setTimeout(runCreativeQueue,10000);
 setTimeout(syncDataForSeo,12000);
 const healthTimer=setInterval(inspectLatest,30000);
+const creativeTimer=setInterval(runCreativeQueue,CREATIVE_INTERVAL_MS);
 const dataTimer=setInterval(syncDataForSeo,INTERVAL_MS);
-
-async function shutdown(signal){clearInterval(healthTimer);clearInterval(dataTimer);child.kill(signal);if(pool)await pool.end().catch(()=>{});setTimeout(()=>process.exit(0),500)}
+async function shutdown(signal){clearInterval(healthTimer);clearInterval(creativeTimer);clearInterval(dataTimer);child.kill(signal);if(pool)await pool.end().catch(()=>{});setTimeout(()=>process.exit(0),500)}
 process.on('SIGTERM',()=>shutdown('SIGTERM'));
 process.on('SIGINT',()=>shutdown('SIGINT'));
