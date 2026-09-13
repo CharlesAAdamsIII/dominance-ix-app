@@ -4,7 +4,6 @@ const crypto=require('crypto');
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const GOOGLE_CLIENT_ID=process.env.GOOGLE_CLIENT_ID||'';
 const GOOGLE_CLIENT_SECRET=process.env.GOOGLE_CLIENT_SECRET||'';
-const GOOGLE_ADS_DEVELOPER_TOKEN=process.env.GOOGLE_ADS_DEVELOPER_TOKEN||'';
 const CREDENTIAL_ENCRYPTION_KEY=process.env.CREDENTIAL_ENCRYPTION_KEY||'';
 const IS_PROD=process.env.NODE_ENV==='production'||!!process.env.RENDER;
 const INTERVAL_MS=Math.max(5,Number(process.env.WORKER_INTERVAL_MINUTES||15))*60*1000;
@@ -67,8 +66,7 @@ async function discoverGA4(connection,token){
 }
 async function discoverGSC(connection,token){const d=await googleJson('https://www.googleapis.com/webmasters/v3/sites',token);return(d.siteEntry||[]).map(x=>({id:x.siteUrl,name:x.siteUrl,parent:x.permissionLevel||'',resource:x.siteUrl}))}
 async function discoverGADS(connection,token){
- if(!GOOGLE_ADS_DEVELOPER_TOKEN)throw Error('GOOGLE_ADS_DEVELOPER_TOKEN missing on worker');
- const d=await googleJson('https://googleads.googleapis.com/v25/customers:listAccessibleCustomers',token,{headers:{'developer-token':GOOGLE_ADS_DEVELOPER_TOKEN}});
+ const d=await googleJson('https://googleads.googleapis.com/v25/customers:listAccessibleCustomers',token);
  return(d.resourceNames||[]).map(x=>({id:String(x).replace('customers/',''),name:String(x).replace('customers/',''),resource:x}))
 }
 
@@ -88,10 +86,9 @@ async function syncGSC(a,connection,token,resource){
 }
 
 async function syncGADS(a,connection,token,resource){
- if(!GOOGLE_ADS_DEVELOPER_TOKEN)throw Error('GOOGLE_ADS_DEVELOPER_TOKEN missing on worker');
  const customer=String(resource).replace(/^customers\//,'').replace(/-/g,''),p=dates(30);
  const query=`SELECT campaign.id,campaign.name,campaign.status,metrics.impressions,metrics.clicks,metrics.cost_micros,metrics.conversions,metrics.conversions_value FROM campaign WHERE segments.date BETWEEN '${p.start}' AND '${p.end}'`;
- const d=await googleJson(`https://googleads.googleapis.com/v25/customers/${customer}/googleAds:search`,token,{method:'POST',headers:{'developer-token':GOOGLE_ADS_DEVELOPER_TOKEN},body:JSON.stringify({query,pageSize:10000})});
+ const d=await googleJson(`https://googleads.googleapis.com/v25/customers/${customer}/googleAds:search`,token,{method:'POST',body:JSON.stringify({query,pageSize:10000})});
  await pool.query('INSERT INTO dominance_data_snapshots(account_id,provider_key,resource_key,snapshot_type,period_start,period_end,data) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)',[a.id,'GADS',customer,'campaign-performance-30d',p.start,p.end,JSON.stringify(d)]);
  return{rows:(d.results||[]).length,period:p}
 }
@@ -130,11 +127,11 @@ async function runAccount(a){
 
 async function cycle(){
  try{
-   await heartbeat('running',{started_at:new Date().toISOString(),google_worker_ready:!!(GOOGLE_CLIENT_ID&&GOOGLE_CLIENT_SECRET&&CREDENTIAL_ENCRYPTION_KEY)});
+   await heartbeat('running',{started_at:new Date().toISOString(),google_worker_ready:!!(GOOGLE_CLIENT_ID&&GOOGLE_CLIENT_SECRET&&CREDENTIAL_ENCRYPTION_KEY),google_ads_access_model:'cloud-project'});
    const r=await pool.query('SELECT id,company_name,website,industry_key FROM dominance_accounts ORDER BY updated_at DESC');
    const states={synced:0,ready:0,waiting:0,partial_error:0};let sourcesSynced=0,awaitingSelection=0,errors=0;
    for(const a of r.rows){const out=await runAccount(a);states[out.state]=(states[out.state]||0)+1;sourcesSynced+=out.results.filter(x=>x.status==='synced').length;awaitingSelection+=out.results.filter(x=>x.status==='awaiting_resource_selection').length;errors+=out.results.filter(x=>x.status==='error').length}
-   await heartbeat(errors?'degraded':'idle',{accounts_checked:r.rows.length,states,sources_synced:sourcesSynced,awaiting_resource_selection:awaitingSelection,source_errors:errors,next_cycle_minutes:INTERVAL_MS/60000,google_worker_ready:!!(GOOGLE_CLIENT_ID&&GOOGLE_CLIENT_SECRET&&CREDENTIAL_ENCRYPTION_KEY)});
+   await heartbeat(errors?'degraded':'idle',{accounts_checked:r.rows.length,states,sources_synced:sourcesSynced,awaiting_resource_selection:awaitingSelection,source_errors:errors,next_cycle_minutes:INTERVAL_MS/60000,google_worker_ready:!!(GOOGLE_CLIENT_ID&&GOOGLE_CLIENT_SECRET&&CREDENTIAL_ENCRYPTION_KEY),google_ads_access_model:'cloud-project'});
    console.log('DOMINANCE worker cycle complete',{accounts:r.rows.length,sourcesSynced,awaitingSelection,errors});
  }catch(e){console.error('DOMINANCE worker cycle failed',e);await heartbeat('error',{error:String(e.message||e)}).catch(()=>{})}
 }
