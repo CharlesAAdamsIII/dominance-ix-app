@@ -22,6 +22,7 @@
  function adaptCompetitor(){const a=requireAccount();if(!a)return;accountBanner(a);const sub=document.querySelector('.sub');if(sub)sub.textContent='COMPETITOR INTELLIGENCE · '+a.company_name.toUpperCase();const hero=document.querySelector('.hero h1');if(hero)hero.textContent=a.company_name+' Competitor Intelligence'}
  function adaptCampaign(){const a=requireAccount();if(!a)return;accountBanner(a);const sub=document.querySelector('.sub');if(sub)sub.textContent='CAMPAIGN MANAGEMENT · '+a.company_name.toUpperCase();const title=document.querySelector('.hero h1');if(title)title.textContent=a.company_name+' Campaign Portfolio'}
  function adaptRadar(){const a=requireAccount();if(!a)return;accountBanner(a)}
- function ready(){installTheme();installBrand();hydrate().then(()=>installSidebar()).catch(()=>installSidebar())}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready);else ready();
+ function installArchitecture(){const p=location.pathname.toLowerCase();if(!p.endsWith('/creative.html')&&!p.endsWith('/campaign.html'))return;if(document.querySelector('script[data-dom-architecture]'))return;const s=document.createElement('script');s.src='/campaign-creative-architecture.js?v=1';s.dataset.domArchitecture='1';document.body.appendChild(s)}
+ function ready(){installTheme();installBrand();hydrate().then(()=>installSidebar()).catch(()=>installSidebar());installArchitecture()}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready);else ready();
  window.DOMINANCE_CTX={get,set,hydrate,clear,requireAccount,nameFromUrl,industryLabel,adaptCompetitor,adaptCampaign,adaptRadar,installBrand,installTheme,installSidebar,stableAccountKey,normalizeWebsite};
 })();
