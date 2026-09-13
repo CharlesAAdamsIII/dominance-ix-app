@@ -44,9 +44,40 @@ async function dataForSeoPost(path,task){
  if(!t||Number(t.status_code||0)!==20000)throw Error(t?.status_message||'DataForSEO task failed');
  return t.result||[];
 }
+
+const NAV_JUNK=new Set(['contact us','about us','home','web logix group','testing and quality assurance','endpoint logic','learn more','our services','services']);
+const COMMERCIAL_HINTS=['ai','automation','software','app','application','development','marketing','seo','advertising','healthcare','cybersecurity','data','analytics','consulting','technology','digital','growth'];
+function cleanPhrase(x){return String(x?.phrase||x||'').trim().replace(/\s+/g,' ').toLowerCase()}
+function phraseScore(p){
+ let score=0;
+ for(const h of COMMERCIAL_HINTS)if(p.includes(h))score+=2;
+ if(/company|agency|services|consulting|development|solutions|platform|provider/.test(p))score+=2;
+ if(p.split(' ').length>=2&&p.split(' ').length<=5)score+=1;
+ if(NAV_JUNK.has(p))score-=20;
+ return score;
+}
+function industryFallbacks(a){
+ const industry=String(a.industry_name||a.industry_key||'').toLowerCase();
+ const common=['ai automation company','custom software development','app development company','ai consulting services','digital growth agency'];
+ if(industry.includes('marketing')||industry.includes('technology'))return ['ai automation company','custom software development','healthcare marketing agency','ai consulting services','app development company'];
+ if(industry.includes('health'))return ['healthcare marketing agency','healthcare software development','healthcare ai solutions','patient acquisition marketing','healthcare automation'];
+ return common;
+}
 function accountKeywords(a){
- const all=[...(a.analysis?.seeds||[]),...(a.analysis?.related||[])].map(x=>String(x?.phrase||x||'').trim()).filter(x=>x.length>2);
- return [...new Set(all)].slice(0,5);
+ const source=[...(a.analysis?.seeds||[]),...(a.analysis?.related||[]),...(a.analysis?.concepts||[])].map(cleanPhrase).filter(x=>x.length>3&&!NAV_JUNK.has(x));
+ const ranked=[...new Set(source)].map(p=>({p,score:phraseScore(p)})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score).map(x=>x.p);
+ const merged=[...ranked,...industryFallbacks(a)];
+ return [...new Set(merged)].slice(0,5);
+}
+
+function responseShape(result){
+ return (result||[]).slice(0,3).map((block,i)=>({
+   block:i,
+   keys:Object.keys(block||{}).slice(0,20),
+   item_count:Array.isArray(block?.items)?block.items.length:0,
+   item_types:Array.isArray(block?.items)?[...new Set(block.items.map(x=>x?.type||'(none)'))].slice(0,12):[],
+   first_item_keys:Array.isArray(block?.items)&&block.items[0]?Object.keys(block.items[0]).slice(0,20):[]
+ }));
 }
 function extractSubregions(result){
  const byGeo=new Map();
@@ -61,7 +92,7 @@ function extractSubregions(result){
  };
  for(const block of result||[]){
    for(const item of block.items||[]){
-     if(item.type!=='subregion_interests')continue;
+     if(item.type&&item.type!=='subregion_interests')continue;
      for(const interest of item.interests||[]){
        for(const v of interest.values||[])add(v,interest.keyword||'');
      }
@@ -69,6 +100,8 @@ function extractSubregions(result){
        const vals=(comp.values||[]).map(Number).filter(Number.isFinite);
        if(vals.length)add({geo_id:comp.geo_id,geo_name:comp.geo_name,value:Math.max(...vals)},'combined');
      }
+     // Some DataForSEO responses expose geographic values directly on item.values.
+     for(const v of item.values||[])add(v,item.keyword||'');
    }
  }
  return [...byGeo.values()].map(x=>({geo_id:x.geo_id,geo_name:x.geo_name,value:x.values.length?Math.max(...x.values):0,keywords:[...x.keywords]}));
@@ -77,13 +110,15 @@ function extractSubregions(result){
 async function syncDataForSeo(){
  if(!pool||!dataForSeoReady())return;
  try{
-   const ar=await pool.query('SELECT id,company_name,analysis FROM dominance_accounts WHERE is_active=TRUE ORDER BY updated_at DESC LIMIT 1');
+   const ar=await pool.query('SELECT id,company_name,website,industry_key,industry_name,analysis FROM dominance_accounts WHERE is_active=TRUE ORDER BY updated_at DESC LIMIT 1');
    const a=ar.rows[0];
    if(!a)return;
    const keywords=accountKeywords(a);
    if(!keywords.length){console.log('[SOURCE] DATAFORSEO NO_KEYWORDS');return}
+   console.log(`[DATAFORSEO] commercial intent set: ${keywords.join(' | ')}`);
    const result=await dataForSeoPost('/v3/keywords_data/dataforseo_trends/subregion_interests/live',{keywords,location_name:'United States',type:'web',time_range:'past_4_hours',tag:`dom-${a.id}-${Date.now()}`});
    const regions=extractSubregions(result);
+   if(!regions.length)console.log('[DATAFORSEO SHAPE] '+JSON.stringify(responseShape(result)));
    const rows=[];
    for(const g of regions){
      const key=String(g.geo_id||g.geo_name).toLowerCase(),current=Number(g.value||0);
@@ -99,13 +134,13 @@ async function syncDataForSeo(){
    rows.sort((a,b)=>b.opportunity_score-a.opportunity_score);
    await pool.query("INSERT INTO dominance_activity(account_id,event_type,module,details) VALUES($1,'market_radar_snapshot','market_radar',$2::jsonb)",[a.id,JSON.stringify({captured_at:new Date().toISOString(),window_minutes:15,demand_window:'past_4_hours',markets:rows.slice(0,100),source_status:{DATAFORSEO_TRENDS:'observed'},keywords,explanation:'National U.S. subregion demand signals from DataForSEO Trends. Values are relative popularity, not absolute search counts.'})]);
    const wr=await pool.query("SELECT details FROM dominance_worker_state WHERE worker_key='intelligence-worker'");
-   const details={...(wr.rows[0]?.details||{}),market_signals:rows.length,dataforseo_ready:true,dataforseo_markets:rows.length,dataforseo_last_sync:new Date().toISOString()};
+   const details={...(wr.rows[0]?.details||{}),market_signals:rows.length,dataforseo_ready:true,dataforseo_markets:rows.length,dataforseo_last_sync:new Date().toISOString(),dataforseo_keywords:keywords};
    await pool.query("UPDATE dominance_worker_state SET details=$1::jsonb WHERE worker_key='intelligence-worker'",[JSON.stringify(details)]);
    console.log(`[SOURCE] DATAFORSEO SYNCED | market signals: ${rows.length} | keywords: ${keywords.join(' | ')}`);
  }catch(e){console.error(`[SOURCE] DATAFORSEO ERROR | ${e.message||e}`)}
 }
 
-// Keep DataForSEO out of the child worker for now so we do not make duplicate paid API calls.
+// Keep DataForSEO out of the child worker so we do not make duplicate paid API calls.
 const childEnv={...process.env,DATAFORSEO_LOGIN:'',DATAFORSEO_PASSWORD:''};
 const child=spawn(process.execPath,['worker.js'],{stdio:'inherit',env:childEnv});
 child.on('exit',async(code,signal)=>{console.error(`DOMINANCE worker exited code=${code} signal=${signal||''}`);if(pool)await pool.end().catch(()=>{});process.exit(code??1)});
