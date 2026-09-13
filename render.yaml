@@ -34,15 +34,13 @@ services:
         sync: false
       - key: CREDENTIAL_ENCRYPTION_KEY
         sync: false
-      - key: GOOGLE_ADS_DEVELOPER_TOKEN
-        sync: false
 
   - type: worker
     name: dominance-intelligence-worker
     runtime: node
     plan: starter
     buildCommand: npm install
-    startCommand: node worker.js
+    startCommand: node worker-monitor.js
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
@@ -61,5 +59,7 @@ services:
         sync: false
       - key: CREDENTIAL_ENCRYPTION_KEY
         sync: false
-      - key: GOOGLE_ADS_DEVELOPER_TOKEN
+      - key: DATAFORSEO_LOGIN
+        sync: false
+      - key: DATAFORSEO_PASSWORD
         sync: false
