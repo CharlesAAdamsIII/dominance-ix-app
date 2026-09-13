@@ -20,12 +20,22 @@ services:
         value: production
       - key: MAX_CRAWL_PAGES
         value: 8
+      - key: APP_URL
+        value: https://dominance-market-radar.onrender.com
       - key: DATABASE_URL
         fromDatabase:
           name: dominance-auth-db
           property: connectionString
       - key: SESSION_SECRET
         generateValue: true
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false
+      - key: GOOGLE_ADS_DEVELOPER_TOKEN
+        sync: false
 
   - type: worker
     name: dominance-intelligence-worker
@@ -45,3 +55,11 @@ services:
         fromDatabase:
           name: dominance-auth-db
           property: connectionString
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false
+      - key: GOOGLE_ADS_DEVELOPER_TOKEN
+        sync: false
