@@ -1,6 +1,7 @@
 const {spawn}=require('child_process');
 const {Pool}=require('pg');
 const {processCreativeQueue}=require('./creative-queue');
+const {processGenerationQueue}=require('./creative-generation');
 
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const DATAFORSEO_LOGIN=process.env.DATAFORSEO_LOGIN||'';
@@ -9,13 +10,12 @@ const INTERVAL_MS=Math.max(5,Number(process.env.WORKER_INTERVAL_MINUTES||15))*60
 const CREATIVE_INTERVAL_MS=Math.max(1,Number(process.env.CREATIVE_QUEUE_INTERVAL_MINUTES||1))*60*1000;
 const IS_PROD=process.env.NODE_ENV==='production'||!!process.env.RENDER;
 const pool=DATABASE_URL?new Pool({connectionString:DATABASE_URL,ssl:IS_PROD?{rejectUnauthorized:false}:false}):null;
-let lastRunId=null,creativeBusy=false;
+let lastRunId=null,creativeBusy=false,generationBusy=false;
 
 function clamp(v,min=0,max=100){return Math.max(min,Math.min(max,v))}
 function pct(cur,prev){if(prev<=0)return cur>0?100:0;return Math.max(-1000,Math.min(1000,((cur-prev)/prev)*100))}
 function printResult(x){const provider=x?.provider||'UNKNOWN';const status=String(x?.status||'unknown').toUpperCase();const markets=Number(x?.market_radar?.markets||0);const suffix=markets?` | market signals: ${markets}`:'';if(x?.error)console.error(`[SOURCE] ${provider} ${status}${suffix} | ${x.error}`);else console.log(`[SOURCE] ${provider} ${status}${suffix}`)}
 async function inspectLatest(){if(!pool)return;try{const r=await pool.query(`SELECT id,account_id,status,summary,completed_at FROM dominance_scan_runs WHERE scan_type='intelligence-cycle' ORDER BY id DESC LIMIT 1`);const row=r.rows[0];if(!row||row.id===lastRunId)return;lastRunId=row.id;const summary=row.summary||{};console.log(`\n[DOMINANCE SOURCE HEALTH] run=${row.id} status=${row.status} company=${summary.company||'unknown'} completed=${row.completed_at||''}`);for(const result of summary.results||[])printResult(result);console.log(`[DOMINANCE SOURCE HEALTH] synced=${summary.synced??0} awaiting=${summary.awaiting_resource_selection??0} errors=${summary.errors??0}\n`)}catch(e){console.error('[DOMINANCE SOURCE HEALTH] monitor error:',e.message||e)}}
-
 function dataForSeoReady(){return!!(DATAFORSEO_LOGIN&&DATAFORSEO_PASSWORD)}
 function dataForSeoAuth(){return 'Basic '+Buffer.from(`${DATAFORSEO_LOGIN}:${DATAFORSEO_PASSWORD}`).toString('base64')}
 async function dataForSeoPost(path,task){const r=await fetch('https://api.dataforseo.com'+path,{method:'POST',headers:{Authorization:dataForSeoAuth(),'Content-Type':'application/json'},body:JSON.stringify([task])});const d=await r.json().catch(()=>({}));if(!r.ok||Number(d.status_code||0)!==20000)throw Error(d.status_message||`DataForSEO API ${r.status}`);const t=d.tasks?.[0];if(!t||Number(t.status_code||0)!==20000)throw Error(t?.status_message||'DataForSEO task failed');return t.result||[]}
@@ -30,6 +30,7 @@ function extractSubregions(result){const byGeo=new Map();const add=(v,keyword)=>
 async function syncDataForSeo(){if(!pool||!dataForSeoReady())return;try{const ar=await pool.query('SELECT id,company_name,website,industry_key,industry_name,analysis FROM dominance_accounts WHERE is_active=TRUE ORDER BY updated_at DESC LIMIT 1');const a=ar.rows[0];if(!a)return;const keywords=accountKeywords(a);if(!keywords.length){console.log('[SOURCE] DATAFORSEO NO_KEYWORDS');return}console.log(`[DATAFORSEO] commercial intent set: ${keywords.join(' | ')}`);const result=await dataForSeoPost('/v3/keywords_data/dataforseo_trends/subregion_interests/live',{keywords,location_name:'United States',type:'web',time_range:'past_4_hours',tag:`dom-${a.id}-${Date.now()}`});const regions=extractSubregions(result);if(!regions.length)console.log('[DATAFORSEO SHAPE] '+JSON.stringify(responseShape(result)));const rows=[];for(const g of regions){const key=String(g.geo_id||g.geo_name).toLowerCase(),current=Number(g.value||0);const pr=await pool.query('SELECT observed_volume,velocity_pct FROM dominance_market_snapshots WHERE account_id=$1 AND geography_key=$2 AND source_key=$3 ORDER BY captured_at DESC LIMIT 1',[a.id,key,'DATAFORSEO_TRENDS']);const prior=Number(pr.rows[0]?.observed_volume||0),velocity=pct(current,prior),oldVelocity=Number(pr.rows[0]?.velocity_pct||0),acceleration=velocity-oldVelocity;const confidence=clamp(55+(pr.rowCount?20:0)+Math.min(25,current/4));const opportunity=clamp(Math.round(current*.65+clamp(50+velocity/4)*.2+clamp(50+acceleration/5)*.05+confidence*.1));const state=opportunity>=80?'surging':opportunity>=65?'rising':opportunity>=45?'active':'baseline';const metrics={keywords,matched_keywords:g.keywords,relative_popularity:current,time_range:'past_4_hours',source_note:'DataForSEO Trends relative keyword popularity by U.S. subregion. Relative interest is not absolute search count.',search_volume_available:false};await pool.query(`INSERT INTO dominance_market_snapshots(account_id,geography_key,geography_name,geography_type,region,country,source_key,observed_volume,prior_volume,velocity_pct,acceleration_pct,opportunity_score,confidence,signal_state,metrics) VALUES($1,$2,$3,'state',$3,'United States','DATAFORSEO_TRENDS',$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,[a.id,key,g.geo_name,current,prior,velocity,acceleration,opportunity,confidence,state,JSON.stringify(metrics)]);rows.push({geography_key:key,geography_name:g.geo_name,geography_type:'state',region:g.geo_name,country:'United States',source_key:'DATAFORSEO_TRENDS',observed_volume:current,search_volume:null,prior_volume:prior,velocity_pct:Math.round(velocity),acceleration_pct:Math.round(acceleration),opportunity_score:opportunity,confidence:Math.round(confidence),signal_state:state,metrics})}rows.sort((a,b)=>b.opportunity_score-a.opportunity_score);await pool.query("INSERT INTO dominance_activity(account_id,event_type,module,details) VALUES($1,'market_radar_snapshot','market_radar',$2::jsonb)",[a.id,JSON.stringify({captured_at:new Date().toISOString(),window_minutes:15,demand_window:'past_4_hours',markets:rows.slice(0,100),source_status:{DATAFORSEO_TRENDS:'observed'},keywords,explanation:'National U.S. subregion demand signals from DataForSEO Trends. Values are relative popularity, not absolute search counts.'})]);const wr=await pool.query("SELECT details FROM dominance_worker_state WHERE worker_key='intelligence-worker'");const details={...(wr.rows[0]?.details||{}),market_signals:rows.length,dataforseo_ready:true,dataforseo_markets:rows.length,dataforseo_last_sync:new Date().toISOString(),dataforseo_keywords:keywords};await pool.query("UPDATE dominance_worker_state SET details=$1::jsonb WHERE worker_key='intelligence-worker'",[JSON.stringify(details)]);console.log(`[SOURCE] DATAFORSEO SYNCED | market signals: ${rows.length} | keywords: ${keywords.join(' | ')}`)}catch(e){console.error(`[SOURCE] DATAFORSEO ERROR | ${e.message||e}`)}}
 
 async function runCreativeQueue(){if(!pool||creativeBusy)return;creativeBusy=true;try{const x=await processCreativeQueue(pool,{maxJobs:5});if(x.processed||x.promoted)console.log(`[CREATIVE QUEUE] cycle complete | briefs=${x.processed} | recommendations promoted=${x.promoted}`)}catch(e){console.error('[CREATIVE QUEUE] cycle error:',e.message||e)}finally{creativeBusy=false}}
+async function runGenerationQueue(){if(!pool||generationBusy)return;generationBusy=true;try{const x=await processGenerationQueue(pool,{maxJobs:2});if(x.processed)console.log(`[CREATIVE GENERATION] cycle complete | requests=${x.processed}`)}catch(e){console.error('[CREATIVE GENERATION] cycle error:',e.message||e)}finally{generationBusy=false}}
 
 // Keep DataForSEO out of the child worker so we do not make duplicate paid API calls.
 const childEnv={...process.env,DATAFORSEO_LOGIN:'',DATAFORSEO_PASSWORD:''};
@@ -38,10 +39,12 @@ child.on('exit',async(code,signal)=>{console.error(`DOMINANCE worker exited code
 child.on('error',e=>console.error('Unable to start DOMINANCE worker:',e));
 setTimeout(inspectLatest,8000);
 setTimeout(runCreativeQueue,10000);
+setTimeout(runGenerationQueue,11000);
 setTimeout(syncDataForSeo,12000);
 const healthTimer=setInterval(inspectLatest,30000);
 const creativeTimer=setInterval(runCreativeQueue,CREATIVE_INTERVAL_MS);
+const generationTimer=setInterval(runGenerationQueue,CREATIVE_INTERVAL_MS);
 const dataTimer=setInterval(syncDataForSeo,INTERVAL_MS);
-async function shutdown(signal){clearInterval(healthTimer);clearInterval(creativeTimer);clearInterval(dataTimer);child.kill(signal);if(pool)await pool.end().catch(()=>{});setTimeout(()=>process.exit(0),500)}
+async function shutdown(signal){clearInterval(healthTimer);clearInterval(creativeTimer);clearInterval(generationTimer);clearInterval(dataTimer);child.kill(signal);if(pool)await pool.end().catch(()=>{});setTimeout(()=>process.exit(0),500)}
 process.on('SIGTERM',()=>shutdown('SIGTERM'));
 process.on('SIGINT',()=>shutdown('SIGINT'));
