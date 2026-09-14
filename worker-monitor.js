@@ -3,6 +3,7 @@ const {Pool}=require('pg');
 const {processCreativeQueue}=require('./creative-queue');
 const {processGenerationQueue}=require('./creative-generation');
 const {syncPublicData}=require('./public-data');
+const {runCreativeSmokeTest}=require('./creative-smoke-test');
 
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const DATAFORSEO_LOGIN=process.env.DATAFORSEO_LOGIN||'';
@@ -12,7 +13,7 @@ const CREATIVE_INTERVAL_MS=Math.max(1,Number(process.env.CREATIVE_QUEUE_INTERVAL
 const PUBLIC_DATA_INTERVAL_MS=Math.max(1,Number(process.env.PUBLIC_DATA_REFRESH_HOURS||24))*3600000;
 const IS_PROD=process.env.NODE_ENV==='production'||!!process.env.RENDER;
 const pool=DATABASE_URL?new Pool({connectionString:DATABASE_URL,ssl:IS_PROD?{rejectUnauthorized:false}:false}):null;
-let lastRunId=null,creativeBusy=false,generationBusy=false,publicDataBusy=false;
+let lastRunId=null,creativeBusy=false,generationBusy=false,publicDataBusy=false,smokeBusy=false;
 
 function clamp(v,min=0,max=100){return Math.max(min,Math.min(max,v))}
 function pct(cur,prev){if(prev<=0)return cur>0?100:0;return Math.max(-1000,Math.min(1000,((cur-prev)/prev)*100))}
@@ -33,10 +34,11 @@ async function syncDataForSeo(){if(!pool||!dataForSeoReady())return;try{const ar
 async function syncPublicSources(){if(!pool||publicDataBusy)return;publicDataBusy=true;try{const ar=await pool.query('SELECT id,company_name,website,industry_key,industry_name,analysis FROM dominance_accounts WHERE is_active=TRUE ORDER BY updated_at DESC LIMIT 1');const a=ar.rows[0];if(!a)return;const results=await syncPublicData(pool,a);await pool.query(`INSERT INTO dominance_activity(account_id,event_type,module,details) VALUES($1,'public_intelligence_sync','market_intelligence',$2::jsonb)`,[a.id,JSON.stringify({synced_at:new Date().toISOString(),results})]);console.log(`[PUBLIC DATA] cycle complete | ${results.map(x=>`${x.provider}:${x.status}`).join(' | ')}`)}catch(e){console.error('[PUBLIC DATA] cycle error:',e.message||e)}finally{publicDataBusy=false}}
 async function runCreativeQueue(){if(!pool||creativeBusy)return;creativeBusy=true;try{const x=await processCreativeQueue(pool,{maxJobs:5});if(x.processed||x.promoted)console.log(`[CREATIVE QUEUE] cycle complete | briefs=${x.processed} | recommendations promoted=${x.promoted}`)}catch(e){console.error('[CREATIVE QUEUE] cycle error:',e.message||e)}finally{creativeBusy=false}}
 async function runGenerationQueue(){if(!pool||generationBusy)return;generationBusy=true;try{const x=await processGenerationQueue(pool,{maxJobs:2});if(x.processed)console.log(`[CREATIVE GENERATION] cycle complete | requests=${x.processed}`)}catch(e){console.error('[CREATIVE GENERATION] cycle error:',e.message||e)}finally{generationBusy=false}}
+async function runSmokeTest(){if(!pool||smokeBusy)return;smokeBusy=true;try{const x=await runCreativeSmokeTest(pool);if(x?.enabled)console.log(`[SMOKE TEST] status=${x.status||'unknown'}`)}catch(e){console.error('[SMOKE TEST] cycle error:',e.message||e)}finally{smokeBusy=false}}
 const childEnv={...process.env,DATAFORSEO_LOGIN:'',DATAFORSEO_PASSWORD:''};
 const child=spawn(process.execPath,['worker.js'],{stdio:'inherit',env:childEnv});
 child.on('exit',async(code,signal)=>{console.error(`DOMINANCE worker exited code=${code} signal=${signal||''}`);if(pool)await pool.end().catch(()=>{});process.exit(code??1)});child.on('error',e=>console.error('Unable to start DOMINANCE worker:',e));
-setTimeout(inspectLatest,8000);setTimeout(runCreativeQueue,10000);setTimeout(runGenerationQueue,11000);setTimeout(syncDataForSeo,12000);setTimeout(syncPublicSources,15000);
-const healthTimer=setInterval(inspectLatest,30000),creativeTimer=setInterval(runCreativeQueue,CREATIVE_INTERVAL_MS),generationTimer=setInterval(runGenerationQueue,CREATIVE_INTERVAL_MS),dataTimer=setInterval(syncDataForSeo,INTERVAL_MS),publicDataTimer=setInterval(syncPublicSources,PUBLIC_DATA_INTERVAL_MS);
-async function shutdown(signal){clearInterval(healthTimer);clearInterval(creativeTimer);clearInterval(generationTimer);clearInterval(dataTimer);clearInterval(publicDataTimer);child.kill(signal);if(pool)await pool.end().catch(()=>{});setTimeout(()=>process.exit(0),500)}
+setTimeout(inspectLatest,8000);setTimeout(runCreativeQueue,10000);setTimeout(runGenerationQueue,11000);setTimeout(syncDataForSeo,12000);setTimeout(syncPublicSources,15000);setTimeout(runSmokeTest,20000);
+const healthTimer=setInterval(inspectLatest,30000),creativeTimer=setInterval(runCreativeQueue,CREATIVE_INTERVAL_MS),generationTimer=setInterval(runGenerationQueue,CREATIVE_INTERVAL_MS),dataTimer=setInterval(syncDataForSeo,INTERVAL_MS),publicDataTimer=setInterval(syncPublicSources,PUBLIC_DATA_INTERVAL_MS),smokeTimer=setInterval(runSmokeTest,CREATIVE_INTERVAL_MS);
+async function shutdown(signal){clearInterval(healthTimer);clearInterval(creativeTimer);clearInterval(generationTimer);clearInterval(dataTimer);clearInterval(publicDataTimer);clearInterval(smokeTimer);child.kill(signal);if(pool)await pool.end().catch(()=>{});setTimeout(()=>process.exit(0),500)}
 process.on('SIGTERM',()=>shutdown('SIGTERM'));process.on('SIGINT',()=>shutdown('SIGINT'));
