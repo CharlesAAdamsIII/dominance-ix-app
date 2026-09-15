@@ -16,5 +16,26 @@ async function ensureProvenanceTrigger(pool){
   END; $$ LANGUAGE plpgsql`);
   await pool.query(`DROP TRIGGER IF EXISTS trg_dominance_freeze_recommendation ON dominance_ad_recommendations`);
   await pool.query(`CREATE TRIGGER trg_dominance_freeze_recommendation AFTER INSERT ON dominance_ad_recommendations FOR EACH ROW EXECUTE FUNCTION dominance_freeze_recommendation_provenance()`);
+
+  await pool.query(`CREATE OR REPLACE FUNCTION dominance_guard_execution_queue() RETURNS trigger AS $$
+  DECLARE r RECORD; ok BOOLEAN;
+  BEGIN
+    IF NEW.status <> 'queued' THEN RETURN NEW; END IF;
+    SELECT dominance_account_id INTO r FROM dominance_ad_recommendations WHERE id=NEW.recommendation_id;
+    IF r.dominance_account_id IS NULL OR r.dominance_account_id <> NEW.dominance_account_id THEN
+      RAISE EXCEPTION 'DOMINANCE execution blocked: customer isolation verification failed';
+    END IF;
+    SELECT EXISTS(
+      SELECT 1 FROM dominance_execution_verifications
+      WHERE recommendation_id=NEW.recommendation_id AND account_id=NEW.dominance_account_id
+        AND status='allowed' AND verified_at > NOW()-INTERVAL '5 minutes'
+    ) INTO ok;
+    IF NOT ok THEN
+      RAISE EXCEPTION 'DOMINANCE execution blocked: fresh Control Plane approval is required';
+    END IF;
+    RETURN NEW;
+  END; $$ LANGUAGE plpgsql`);
+  await pool.query(`DROP TRIGGER IF EXISTS trg_dominance_guard_execution_queue ON dominance_ad_execution_queue`);
+  await pool.query(`CREATE TRIGGER trg_dominance_guard_execution_queue BEFORE INSERT ON dominance_ad_execution_queue FOR EACH ROW EXECUTE FUNCTION dominance_guard_execution_queue()`);
 }
 module.exports={ensureProvenanceTrigger};
