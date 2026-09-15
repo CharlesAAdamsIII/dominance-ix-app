@@ -1,11 +1,11 @@
 {
   "name": "dominance-market-radar",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "DOMINANCE adaptive market intelligence operating system",
-  "main": "server-production.js",
+  "main": "server-next.js",
   "scripts": {
-    "start": "node server-production.js",
+    "start": "node server-next.js",
     "migrate": "node migrate.js",
     "restore:wlg": "node restore-wlg.js",
     "postinstall": "node migrate.js && node restore-wlg.js",
