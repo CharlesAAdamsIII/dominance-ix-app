@@ -16,7 +16,7 @@ function wrappedExpress(...args){
       require('./competitor-intelligence-api').attach(router);
       const marketRadarPage=(req,res,next)=>{try{
         const file=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
-        const spatial='<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script><script src="/market-map-visuals.js?v=1"></script><script src="/market-map-layout.js?v=1"></script>';
+        const spatial='<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script><script src="/market-map-layer-extension.js?v=1"></script><script src="/market-map-visuals.js?v=1"></script><script src="/market-map-layout.js?v=1"></script>';
         res.type('html').send(file.replace('</body>',spatial+'</body>'));
       }catch(e){next(e)}};
       router.get('/',pageAuth,marketRadarPage);
