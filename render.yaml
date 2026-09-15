@@ -51,6 +51,14 @@ services:
         value: 15
       - key: PROFILE_WORKER_INTERVAL_MINUTES
         value: 15
+      - key: MARKET_INTELLIGENCE_INTERVAL_MINUTES
+        value: 30
+      - key: COMPETITOR_INTELLIGENCE_INTERVAL_MINUTES
+        value: 30
+      - key: COMPETITOR_REFRESH_QUEUE_MINUTES
+        value: 1
+      - key: COMPETITOR_TRACKED_KEYWORDS
+        value: 5
       - key: CREATIVE_QUEUE_INTERVAL_MINUTES
         value: 1
       - key: PUBLIC_INTELLIGENCE_INTERVAL_HOURS

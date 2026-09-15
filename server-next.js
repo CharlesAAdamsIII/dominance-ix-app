@@ -13,6 +13,7 @@ function wrappedExpress(...args){
       require('./control-plane-api').attach(router);
       require('./campaign-workspace-api').attach(router);
       require('./market-intelligence-api').attach(router);
+      require('./competitor-intelligence-api').attach(router);
       router.get('/integrity.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'integrity.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/sidebar-collapse.js"></script></body>'))}catch(e){next(e)}});
       router.get('/advertising.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'advertising.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/context.js"></script></body>'))}catch(e){next(e)}});
       const stack=app._router?.stack||[];
@@ -21,7 +22,7 @@ function wrappedExpress(...args){
       if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.route?.path==='*');
       if(insertAt<0)insertAt=stack.length;
       stack.splice(insertAt,0,...router.stack);
-      console.log('[DOMINANCE] Advertising + Control Plane + Campaign + Market Intelligence APIs attached');
+      console.log('[DOMINANCE] Advertising + Control Plane + Campaign + Market + Competitor Intelligence APIs attached');
     }catch(e){console.error('[DOMINANCE] API attach failed',e)}
     return originalListen(...listenArgs);
   };
