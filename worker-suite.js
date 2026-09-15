@@ -8,6 +8,8 @@ const adCore=require('./ad-intelligence-core');
 const marketCore=require('./market-intelligence-core');
 const cp=require('./control-plane-core');
 
+cp.WORKER_CONTRACTS['market-intelligence-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:30,max_staleness_minutes:75,critical:true,outputs:['keyword_intelligence','dynamic_target_areas','market_placement_decisions','advertising_handoff']};
+
 let profiler=null,advertising=null,controlPlane=null,marketIntelligence=null;
 async function start(){
   const bootstrap=adCore.makePool();
