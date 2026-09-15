@@ -7,13 +7,14 @@ function wrappedExpress(...args){
     try{
       const router=originalExpress.Router();
       require('./ad-intelligence-api').attach(router);
+      require('./control-plane-api').attach(router);
       const stack=app._router?.stack||[];
       let insertAt=stack.findIndex(layer=>layer?.name==='serveStatic');
       if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.route?.path==='*');
       if(insertAt<0)insertAt=stack.length;
       stack.splice(insertAt,0,...router.stack);
-      console.log('[AD INTELLIGENCE] API routes attached');
-    }catch(e){console.error('[AD INTELLIGENCE] API attach failed',e)}
+      console.log('[DOMINANCE] Advertising Intelligence + Control Plane API routes attached');
+    }catch(e){console.error('[DOMINANCE] API attach failed',e)}
     return originalListen(...listenArgs);
   };
   return app;
