@@ -53,6 +53,8 @@ services:
         value: 15
       - key: MARKET_INTELLIGENCE_INTERVAL_MINUTES
         value: 30
+      - key: DEMAND_SURFACE_INTERVAL_MINUTES
+        value: 60
       - key: COMPETITOR_INTELLIGENCE_INTERVAL_MINUTES
         value: 30
       - key: COMPETITOR_REFRESH_QUEUE_MINUTES
