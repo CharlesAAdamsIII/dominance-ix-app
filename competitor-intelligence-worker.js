@@ -1,5 +1,6 @@
 const core=require('./competitor-intelligence-core');
 const {processPaidAndLocalChanges}=require('./competitor-response-engine');
+const {monitorGoogleBusinessProfiles}=require('./competitor-listing-monitor');
 const cp=require('./control-plane-core');
 const pool=core.makePool();
 const INTERVAL_MS=Math.max(15,Number(process.env.COMPETITOR_INTELLIGENCE_INTERVAL_MINUTES||30))*60*1000;
@@ -10,6 +11,7 @@ async function processAccount(account,{force=false}={}){const started=new Date()
  result.ranks=await core.trackRanks(pool,account,force);
  result.competitive_responses=await processPaidAndLocalChanges(pool,account);
  result.sites=await core.crawlSites(pool,account,force);
+ result.google_business_profiles=await monitorGoogleBusinessProfiles(pool,account,{force});
  result.google_ads=await core.trackGoogleAdsTransparency(pool,account,force);
  result.recommendations=await core.generateEventRecommendations(pool,account);
  await cp.recordWorkerAccountRun(pool,'competitor-intelligence-worker',account.id,'completed',result,started).catch(()=>{});
