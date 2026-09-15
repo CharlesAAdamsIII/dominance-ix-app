@@ -34,10 +34,6 @@ services:
         sync: false
       - key: CREDENTIAL_ENCRYPTION_KEY
         sync: false
-      - key: DATAFORSEO_LOGIN
-        sync: false
-      - key: DATAFORSEO_PASSWORD
-        sync: false
 
   - type: worker
     name: dominance-intelligence-worker
@@ -59,6 +55,8 @@ services:
         value: 30
       - key: COMPETITOR_INTELLIGENCE_INTERVAL_MINUTES
         value: 30
+      - key: COMPETITOR_REFRESH_QUEUE_MINUTES
+        value: 1
       - key: COMPETITOR_TRACKED_KEYWORDS
         value: 5
       - key: CREATIVE_QUEUE_INTERVAL_MINUTES
