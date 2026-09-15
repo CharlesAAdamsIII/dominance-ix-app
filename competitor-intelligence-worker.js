@@ -1,4 +1,5 @@
 const core=require('./competitor-intelligence-core');
+const {monitorCompetitorRanks}=require('./competitor-rank-monitor');
 const {processPaidAndLocalChanges}=require('./competitor-response-engine');
 const {monitorGoogleBusinessProfiles}=require('./competitor-listing-monitor');
 const {processCompetitorSeoEvents}=require('./competitor-seo-event-engine');
@@ -9,7 +10,7 @@ let timer=null,busy=false;
 
 async function processAccount(account,{force=false}={}){const started=new Date();const result={};try{
  result.discovery=await core.discoverCompetitors(pool,account,force);
- result.ranks=await core.trackRanks(pool,account,force);
+ result.ranks=await monitorCompetitorRanks(pool,account,{force});
  result.competitive_responses=await processPaidAndLocalChanges(pool,account);
  result.sites=await core.crawlSites(pool,account,force);
  result.google_business_profiles=await monitorGoogleBusinessProfiles(pool,account,{force});
