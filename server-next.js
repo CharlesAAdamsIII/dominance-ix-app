@@ -10,7 +10,8 @@ function wrappedExpress(...args){
       require('./control-plane-api').attach(router);
       require('./campaign-workspace-api').attach(router);
       const stack=app._router?.stack||[];
-      let insertAt=stack.findIndex(layer=>layer?.name==='serveStatic');
+      let insertAt=stack.findIndex(layer=>layer?.route?.path==='/campaign.html');
+      if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.name==='serveStatic');
       if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.route?.path==='*');
       if(insertAt<0)insertAt=stack.length;
       stack.splice(insertAt,0,...router.stack);
