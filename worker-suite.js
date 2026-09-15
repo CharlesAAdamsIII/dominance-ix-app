@@ -11,7 +11,7 @@ const competitorCore=require('./competitor-intelligence-core');
 const cp=require('./control-plane-core');
 
 cp.WORKER_CONTRACTS['market-intelligence-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:30,max_staleness_minutes:75,critical:true,outputs:['keyword_intelligence','dynamic_target_areas','market_placement_decisions','advertising_handoff']};
-cp.WORKER_CONTRACTS['competitor-intelligence-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:30,max_staleness_minutes:90,critical:true,outputs:['competitor_discovery','google_bing_rank_change','competitor_site_change','google_ads_transparency','local_pack_visibility','seo_recommendations','advertising_competitor_signals','creative_differentiation']};
+cp.WORKER_CONTRACTS['competitor-intelligence-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:30,max_staleness_minutes:90,critical:false,outputs:['competitor_discovery','google_bing_rank_change','competitor_site_change','google_ads_transparency','local_pack_visibility','seo_recommendations','advertising_competitor_signals','creative_differentiation']};
 
 let profiler=null,advertising=null,controlPlane=null,marketIntelligence=null,competitorIntelligence=null;
 async function start(){
