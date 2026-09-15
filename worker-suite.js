@@ -1,6 +1,7 @@
 const {startBusinessProfileWorker}=require('./business-profile-worker');
 const {startAdIntelligenceWorker}=require('./ad-intelligence-worker');
 const {startControlPlaneWorker}=require('./control-plane-worker');
+const {ensureProvenanceTrigger}=require('./provenance-trigger');
 const adCore=require('./ad-intelligence-core');
 const cp=require('./control-plane-core');
 
@@ -10,6 +11,7 @@ async function start(){
   if(bootstrap){
     await adCore.ensureAdSchema(bootstrap);
     await cp.ensureControlPlaneSchema(bootstrap);
+    await ensureProvenanceTrigger(bootstrap);
     await bootstrap.end().catch(()=>{});
   }
   profiler=startBusinessProfileWorker();
