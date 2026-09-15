@@ -8,12 +8,13 @@ function wrappedExpress(...args){
   app.listen=(...listenArgs)=>{
     try{
       const router=originalExpress.Router();
+      const pageAuth=(req,res,next)=>req.session&&req.session.userId?next():res.redirect('/login.html');
       require('./ad-intelligence-api').attach(router);
       require('./control-plane-api').attach(router);
       require('./campaign-workspace-api').attach(router);
       require('./market-intelligence-api').attach(router);
-      router.get('/integrity.html',(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'integrity.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/sidebar-collapse.js"></script></body>'))}catch(e){next(e)}});
-      router.get('/advertising.html',(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'advertising.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/context.js"></script></body>'))}catch(e){next(e)}});
+      router.get('/integrity.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'integrity.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/sidebar-collapse.js"></script></body>'))}catch(e){next(e)}});
+      router.get('/advertising.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'advertising.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/context.js"></script></body>'))}catch(e){next(e)}});
       const stack=app._router?.stack||[];
       let insertAt=stack.findIndex(layer=>layer?.route?.path==='/campaign.html');
       if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.name==='serveStatic');
