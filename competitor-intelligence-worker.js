@@ -2,6 +2,7 @@ const core=require('./competitor-intelligence-core');
 const {monitorCompetitorRanks}=require('./competitor-rank-monitor');
 const {processPaidAndLocalChanges}=require('./competitor-response-engine');
 const {monitorGoogleBusinessProfiles}=require('./competitor-listing-monitor');
+const {monitorGoogleAdsTransparency}=require('./competitor-google-ads-monitor');
 const {processCompetitorSeoEvents}=require('./competitor-seo-event-engine');
 const {reconcileCompetitorLifecycle}=require('./competitor-lifecycle');
 const cp=require('./control-plane-core');
@@ -16,7 +17,7 @@ async function processAccount(account,{force=false}={}){const started=new Date()
  result.sites=await core.crawlSites(pool,account,force);
  result.google_business_profiles=await monitorGoogleBusinessProfiles(pool,account,{force});
  result.seo_events=await processCompetitorSeoEvents(pool,account);
- result.google_ads=await core.trackGoogleAdsTransparency(pool,account,force);
+ result.google_ads=await monitorGoogleAdsTransparency(pool,account,{force});
  result.recommendations=await core.generateEventRecommendations(pool,account);
  result.lifecycle=await reconcileCompetitorLifecycle(pool,account);
  await cp.recordWorkerAccountRun(pool,'competitor-intelligence-worker',account.id,'completed',result,started).catch(()=>{});
