@@ -9,13 +9,14 @@ function wrappedExpress(...args){
       require('./ad-intelligence-api').attach(router);
       require('./control-plane-api').attach(router);
       require('./campaign-workspace-api').attach(router);
+      require('./market-intelligence-api').attach(router);
       const stack=app._router?.stack||[];
       let insertAt=stack.findIndex(layer=>layer?.route?.path==='/campaign.html');
       if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.name==='serveStatic');
       if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.route?.path==='*');
       if(insertAt<0)insertAt=stack.length;
       stack.splice(insertAt,0,...router.stack);
-      console.log('[DOMINANCE] Advertising Intelligence + Control Plane + Campaign Workspace API routes attached');
+      console.log('[DOMINANCE] Advertising + Control Plane + Campaign + Market Intelligence APIs attached');
     }catch(e){console.error('[DOMINANCE] API attach failed',e)}
     return originalListen(...listenArgs);
   };
