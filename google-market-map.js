@@ -9,8 +9,21 @@
   const clamp=(v,min=0,max=100)=>Math.max(min,Math.min(max,Number(v||0)));
   const norm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const rgb=v=>v>=85?[255,217,90]:v>=75?[243,184,79]:v>=65?[102,224,189]:v>=55?[56,183,178]:v>=40?[77,125,140]:[52,73,83];
-  let gmap=null,overlay=null,geocoder=null,ready=false,geocodeBusy=false,pulsePhase=0,pulseTimer=null;
+  let gmap=null,overlay=null,geocoder=null,ready=false,geocodeBusy=false,pulsePhase=0,pulseTimer=null,googleLoadPromise=null;
 
+  function ensureGoogle(){
+    if(window.google?.maps?.importLibrary)return Promise.resolve();
+    if(googleLoadPromise)return googleLoadPromise;
+    googleLoadPromise=new Promise((resolve,reject)=>{
+      const s=document.createElement('script');
+      s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(cfg.apiKey)+'&loading=async&v=weekly';
+      s.async=true;s.defer=true;
+      s.onload=()=>window.google?.maps?.importLibrary?resolve():reject(Error('Google Maps API loaded without importLibrary.'));
+      s.onerror=()=>reject(Error('Unable to load Google Maps JavaScript API.'));
+      document.head.appendChild(s);
+    });
+    return googleLoadPromise;
+  }
   function marketCoordGoogle(m){
     if(finite(m?.latitude)&&finite(m?.longitude))return{lat:Number(m.latitude),lng:Number(m.longitude)};
     try{const c=marketCoord(m);if(c&&finite(c[0])&&finite(c[1]))return{lat:Number(c[0]),lng:Number(c[1])}}catch{}
@@ -70,7 +83,7 @@
   }
   async function init(){
     try{
-      if(!window.google?.maps?.importLibrary)throw Error('Google Maps loader did not initialize.');
+      await ensureGoogle();
       if(typeof deck==='undefined'||!deck.GoogleMapsOverlay)throw Error('deck.gl Google Maps bundle did not initialize.');
       const {Map}=await google.maps.importLibrary('maps');const {Geocoder}=await google.maps.importLibrary('geocoding');
       geocoder=new Geocoder();
