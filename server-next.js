@@ -20,9 +20,10 @@ function wrappedExpress(...args){
         const mapId=process.env.GOOGLE_MAPS_MAP_ID||'';
         const googleEnabled=!!(mapsKey&&mapId);
         const googleConfig=`<script>window.DOMINANCE_MAP_CONFIG=${JSON.stringify({enabled:googleEnabled,apiKey:mapsKey,mapId})}</script>`;
-        const googleSpatial=googleEnabled?'<script src="https://unpkg.com/deck.gl@^9.0.0/dist.min.js"></script><script src="/market-map-layer-extension.js?v=2"></script><script src="/google-market-map.js?v=1"></script>':'';
-        const leafletFallback=!googleEnabled?'<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script><script src="/market-basemap.js?v=1"></script><script src="/market-map-layer-extension.js?v=2"></script><script src="/market-map-visuals.js?v=1"></script><script src="/market-map-layout.js?v=1"></script>':'';
-        res.type('html').send(file.replace('</body>',googleConfig+googleSpatial+leafletFallback+'</body>'));
+        const sharedFallback='<script src="/market-basemap.js?v=1"></script><script src="/market-map-layer-extension.js?v=2"></script>';
+        const googleSpatial=googleEnabled?'<script src="https://unpkg.com/deck.gl@^9.0.0/dist.min.js"></script><script src="/google-market-map.js?v=1"></script>':'';
+        const leafletSpatial=!googleEnabled?'<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script><script src="/market-map-visuals.js?v=1"></script><script src="/market-map-layout.js?v=1"></script>':'';
+        res.type('html').send(file.replace('</body>',googleConfig+sharedFallback+googleSpatial+leafletSpatial+'</body>'));
       }catch(e){next(e)}};
       router.get('/',pageAuth,marketRadarPage);
       router.get('/index.html',pageAuth,marketRadarPage);
