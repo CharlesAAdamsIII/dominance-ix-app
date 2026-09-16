@@ -32,6 +32,10 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
+      - key: GOOGLE_MAPS_BROWSER_API_KEY
+        sync: false
+      - key: GOOGLE_MAPS_MAP_ID
+        sync: false
       - key: CREDENTIAL_ENCRYPTION_KEY
         sync: false
 
