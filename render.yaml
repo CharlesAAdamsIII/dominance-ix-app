@@ -59,6 +59,10 @@ services:
         value: 30
       - key: DEMAND_SURFACE_INTERVAL_MINUTES
         value: 60
+      - key: MARKET_REGIONAL_SNAPSHOT_INTERVAL_MINUTES
+        value: 15
+      - key: DEMAND_EVENT_INTERVAL_MINUTES
+        value: 15
       - key: COMPETITOR_INTELLIGENCE_INTERVAL_MINUTES
         value: 30
       - key: COMPETITOR_REFRESH_QUEUE_MINUTES
