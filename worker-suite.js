@@ -5,6 +5,7 @@ const {startMarketIntelligenceWorker}=require('./market-intelligence-worker');
 const {startMarketDemandSurfaceWorker}=require('./market-demand-surface-worker');
 const {startMarketRegionalSnapshotWorker}=require('./market-regional-snapshot-worker');
 const {startCompetitorIntelligenceWorker}=require('./competitor-intelligence-worker');
+const {startCoreSourceSyncWorker}=require('./core-source-sync-supervisor');
 const {ensureProvenanceTrigger}=require('./provenance-trigger');
 const releases=require('./intelligence-release-gate');
 const adCore=require('./ad-intelligence-core');
@@ -17,7 +18,7 @@ cp.WORKER_CONTRACTS['market-demand-surface-worker']={version:'1.0.0',scope:'ever
 cp.WORKER_CONTRACTS['market-regional-snapshot-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:15,max_staleness_minutes:45,critical:false,outputs:['regional_4h_demand_snapshots','hotspot_velocity_surface']};
 cp.WORKER_CONTRACTS['competitor-intelligence-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:30,max_staleness_minutes:90,critical:false,outputs:['competitor_discovery','google_bing_rank_change','competitor_site_change','google_ads_transparency','local_pack_visibility','seo_recommendations','advertising_competitor_signals','creative_differentiation']};
 
-let profiler=null,advertising=null,controlPlane=null,marketIntelligence=null,demandSurface=null,regionalSnapshots=null,competitorIntelligence=null;
+let profiler=null,advertising=null,controlPlane=null,marketIntelligence=null,demandSurface=null,regionalSnapshots=null,competitorIntelligence=null,coreSourceSync=null;
 async function start(){
   const bootstrap=adCore.makePool();
   if(bootstrap){
@@ -29,6 +30,7 @@ async function start(){
     await ensureProvenanceTrigger(bootstrap);
     await bootstrap.end().catch(()=>{});
   }
+  coreSourceSync=startCoreSourceSyncWorker();
   profiler=startBusinessProfileWorker();
   advertising=startAdIntelligenceWorker();
   marketIntelligence=startMarketIntelligenceWorker();
@@ -39,6 +41,7 @@ async function start(){
   require('./worker-monitor');
 }
 async function stopWorkers(){
+  if(coreSourceSync?.stop)await coreSourceSync.stop();
   if(profiler?.stop)await profiler.stop();
   if(advertising?.stop)await advertising.stop();
   if(marketIntelligence?.stop)await marketIntelligence.stop();
