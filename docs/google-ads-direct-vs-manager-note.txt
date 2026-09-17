@@ -1,0 +1,5 @@
+DOMINANCE Google Ads authorization note
+
+Direct advertiser account: leave GOOGLE_ADS_LOGIN_CUSTOMER_ID unset. Production Google Ads API calls require the Google Cloud project that owns the OAuth client to have production-capable access (Explorer, Basic, or Standard). Test access can only query test accounts.
+
+Manager/MCC account path: set GOOGLE_ADS_LOGIN_CUSTOMER_ID only when the authenticated access path to the advertiser goes through a manager account.
