@@ -6,7 +6,7 @@ function startCoreSourceSyncWorker(){
  stopping=false;
  const launch=()=>{
   if(stopping)return;
-  child=fork(path.join(__dirname,'worker.js'),[],{env:{...process.env,DOMINANCE_SUPERVISED_CORE_SOURCE:'1'},stdio:'inherit'});
+  child=fork(path.join(__dirname,'worker-auth-entry.js'),[],{env:{...process.env,DOMINANCE_SUPERVISED_CORE_SOURCE:'1'},stdio:'inherit'});
   console.log('[CORE SOURCE SYNC] supervised worker started',child.pid);
   child.on('exit',(code,signal)=>{
    console.log('[CORE SOURCE SYNC] worker exited',{code,signal,stopping});
