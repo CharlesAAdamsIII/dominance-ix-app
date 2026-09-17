@@ -1,3 +1,4 @@
+require('./google-ads-fetch-auth');
 const {startBusinessProfileWorker}=require('./business-profile-worker');
 const {startAdIntelligenceWorker}=require('./ad-intelligence-worker');
 const {startControlPlaneWorker}=require('./control-plane-worker');
