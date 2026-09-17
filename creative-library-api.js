@@ -18,7 +18,7 @@ function pipelineSummary(requests,assets){
  const recent_errors=requests.filter(r=>r.last_error).slice(0,5).map(r=>({id:r.id,platform:r.platform,asset_category:r.asset_category,status:r.status,error:r.last_error,created_at:r.created_at}));
  return{
   request_status,asset_status,recent_errors,
-  provider:{openai_configured:!!String(process.env.OPENAI_API_KEY||'').trim(),text_model:process.env.OPENAI_TEXT_MODEL||'gpt-5.6-terra',image_model:process.env.OPENAI_IMAGE_MODEL||'gpt-image-2.5-flare',video_model:process.env.OPENAI_VIDEO_MODEL||null},
+  provider:{openai_configured:!!String(process.env.OPENAI_API_KEY||'').trim(),text_model:process.env.OPENAI_TEXT_MODEL||'gpt-5.6-terra',image_model:process.env.OPENAI_IMAGE_MODEL||'gpt-image-2',video_model:process.env.OPENAI_VIDEO_MODEL||null},
   production_interval_minutes:Math.max(1,Number(process.env.CREATIVE_PRODUCTION_INTERVAL_MINUTES||1))
  };
 }
