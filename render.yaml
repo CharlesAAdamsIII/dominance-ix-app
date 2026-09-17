@@ -95,6 +95,8 @@ services:
         value: 5
       - key: CREATIVE_RESEARCH_INTERVAL_MINUTES
         value: 30
+      - key: CREATIVE_PRODUCTION_INTERVAL_MINUTES
+        value: 1
       - key: CREATIVE_QUEUE_INTERVAL_MINUTES
         value: 1
       - key: PUBLIC_INTELLIGENCE_INTERVAL_HOURS
