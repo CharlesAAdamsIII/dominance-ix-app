@@ -6,6 +6,7 @@ const demandEventModule=require('./market-demand-event-worker');
 const {runMarketNewsSignals}=require('./market-news-signal-worker');
 const {runCompetitorIntelligence}=require('./competitor-intelligence-worker');
 const {runCreativeResearch}=require('./creative-research-worker');
+const {runGoogleIngestionPromotion}=require('./google-ingestion-promotion-worker');
 const {processCreativeQueue}=require('./creative-queue');
 const {processGenerationQueue}=require('./creative-generation');
 
@@ -34,6 +35,7 @@ async function runRescue(){
    const demandRun=eventRunner();if(demandRun)await run('demand_events',()=>demandRun());
    await run('news',()=>runMarketNewsSignals());
    await run('competitors',()=>runCompetitorIntelligence({force:false}));
+   await run('google_promotion',()=>runGoogleIngestionPromotion());
    await run('creative_research',()=>runCreativeResearch());
    await run('creative_queue',()=>processCreativeQueue(pool,{maxJobs:8}));
    await run('creative_generation',()=>processGenerationQueue(pool,{maxJobs:4}));
