@@ -35,6 +35,7 @@ function wrappedExpress(...args){
       const injectPage=(fileName,scripts)=>(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,fileName),'utf8');res.type('html').send(file.replace('</body>',scripts+'</body>'))}catch(e){next(e)}};
       router.get('/',pageAuth,marketRadarPage);
       router.get('/index.html',pageAuth,marketRadarPage);
+      router.get('/admin.html',pageAuth,injectPage('admin.html','<script src="/source-health-ui.js?v=1"></script>'));
       router.get('/competitor.html',pageAuth,injectPage('competitor.html','<script src="/competitor-integrity.js?v=1"></script>'));
       router.get('/creative.html',pageAuth,injectPage('creative.html','<script src="/creative-integrity.js?v=2"></script><script src="/creative-library.js?v=1"></script>'));
       router.get('/integrity.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'integrity.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/sidebar-collapse.js"></script></body>'))}catch(e){next(e)}});
