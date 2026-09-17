@@ -25,8 +25,10 @@ async function recordAccountRuns(startedAt){
  for(const a of accounts.rows){
   const details=await accountPipelineState(a.id);
   const hasFailures=Number(details.requests.failed||0)>0;
+  const status=hasFailures?'partial_error':'completed';
   await cp.recordWorkerAccountRun(pool,'creative-queue',a.id,'completed',details,startedAt).catch(()=>{});
-  await cp.recordWorkerAccountRun(pool,'creative-generation',a.id,hasFailures?'partial_error':'completed',details,startedAt).catch(()=>{});
+  await cp.recordWorkerAccountRun(pool,'creative-generation',a.id,status,details,startedAt).catch(()=>{});
+  await cp.recordWorkerAccountRun(pool,'creative-production-worker',a.id,status,details,startedAt).catch(()=>{});
  }
  return accounts.rowCount;
 }
