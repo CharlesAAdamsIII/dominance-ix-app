@@ -1,4 +1,5 @@
 require('./google-ads-fetch-auth');
+const {startCoreSourceSyncWorker}=require('./core-source-sync-supervisor');
 const {startBusinessProfileWorker}=require('./business-profile-worker');
 const {startAdIntelligenceWorker}=require('./ad-intelligence-worker');
 const {startControlPlaneWorker}=require('./control-plane-worker');
@@ -27,7 +28,7 @@ cp.WORKER_CONTRACTS['competitor-intelligence-worker']={version:'1.0.0',scope:'ev
 cp.WORKER_CONTRACTS['creative-research-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:30,max_staleness_minutes:90,critical:false,outputs:['search_intent_research','competitor_creative_research','market_signal_research','creative_portfolio_requests']};
 cp.WORKER_CONTRACTS['google-ingestion-promotion-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:5,max_staleness_minutes:20,critical:false,outputs:['google_ads_account_import','google_ads_campaign_import','campaign_performance_visibility']};
 
-let profiler=null,advertising=null,controlPlane=null,marketIntelligence=null,demandSurface=null,regionalSnapshots=null,demandEvents=null,newsSignals=null,competitorIntelligence=null,creativeResearch=null,googlePromotion=null,monitorSupport=null;
+let coreSourceSync=null,profiler=null,advertising=null,controlPlane=null,marketIntelligence=null,demandSurface=null,regionalSnapshots=null,demandEvents=null,newsSignals=null,competitorIntelligence=null,creativeResearch=null,googlePromotion=null,monitorSupport=null;
 async function start(){
   const bootstrap=adCore.makePool();
   if(bootstrap){
@@ -39,6 +40,7 @@ async function start(){
     await ensureProvenanceTrigger(bootstrap);
     await bootstrap.end().catch(()=>{});
   }
+  coreSourceSync=startCoreSourceSyncWorker();
   profiler=startBusinessProfileWorker();
   advertising=startAdIntelligenceWorker();
   marketIntelligence=startMarketIntelligenceWorker();
@@ -54,6 +56,7 @@ async function start(){
   console.log('[WORKER SUITE] full DOMINANCE intelligence suite online');
 }
 async function stopWorkers(signal='SIGTERM'){
+  if(coreSourceSync?.stop)await coreSourceSync.stop();
   if(profiler?.stop)await profiler.stop();
   if(advertising?.stop)await advertising.stop();
   if(marketIntelligence?.stop)await marketIntelligence.stop();
