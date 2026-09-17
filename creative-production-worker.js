@@ -11,12 +11,12 @@ let timer=null,busy=false;
 
 async function accountPipelineState(accountId){
  const [requests,assets]=await Promise.all([
-  pool.query(`SELECT status,COUNT(*)::int n,MAX(updated_at) last_at FROM dominance_creative_requests WHERE dominance_account_id=$1 GROUP BY status`,[accountId]).catch(()=>({rows:[]})),
+  pool.query(`SELECT status,COUNT(*)::int n,MAX(COALESCE(completed_at,claimed_at,created_at)) last_at FROM dominance_creative_requests WHERE dominance_account_id=$1 GROUP BY status`,[accountId]).catch(()=>({rows:[]})),
   pool.query(`SELECT status,COUNT(*)::int n,MAX(updated_at) last_at FROM dominance_generated_assets WHERE dominance_account_id=$1 GROUP BY status`,[accountId]).catch(()=>({rows:[]}))
  ]);
  const req={};for(const r of requests.rows)req[r.status]=Number(r.n||0);
  const ast={};for(const r of assets.rows)ast[r.status]=Number(r.n||0);
- const err=await pool.query(`SELECT id,asset_category,platform,status,last_error,updated_at FROM dominance_creative_requests WHERE dominance_account_id=$1 AND last_error IS NOT NULL ORDER BY updated_at DESC LIMIT 3`,[accountId]).catch(()=>({rows:[]}));
+ const err=await pool.query(`SELECT id,asset_category,platform,status,last_error,COALESCE(completed_at,claimed_at,created_at) last_at FROM dominance_creative_requests WHERE dominance_account_id=$1 AND last_error IS NOT NULL ORDER BY COALESCE(completed_at,claimed_at,created_at) DESC LIMIT 3`,[accountId]).catch(()=>({rows:[]}));
  return{requests:req,assets:ast,recent_errors:err.rows};
 }
 
