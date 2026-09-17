@@ -42,8 +42,6 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
-      - key: GOOGLE_ADS_DEVELOPER_TOKEN
-        sync: false
       - key: GOOGLE_ADS_LOGIN_CUSTOMER_ID
         sync: false
       - key: GOOGLE_MAPS_BROWSER_API_KEY
@@ -114,8 +112,6 @@ services:
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
-        sync: false
-      - key: GOOGLE_ADS_DEVELOPER_TOKEN
         sync: false
       - key: GOOGLE_ADS_LOGIN_CUSTOMER_ID
         sync: false
