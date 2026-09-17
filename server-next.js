@@ -15,6 +15,7 @@ function wrappedExpress(...args){
       require('./market-intelligence-api').attach(router);
       require('./market-live-intelligence-api').attach(router);
       require('./competitor-intelligence-api').attach(router);
+      require('./creative-evidence-api').attach(router);
       const marketRadarPage=(req,res,next)=>{try{
         const file=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
         const mapsKey=process.env.GOOGLE_MAPS_BROWSER_API_KEY||'';
