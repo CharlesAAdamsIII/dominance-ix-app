@@ -1,3 +1,4 @@
+require('./google-ads-fetch-auth');
 const fs=require('fs');
 const path=require('path');
 const expressPath=require.resolve('express');
