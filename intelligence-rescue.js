@@ -7,6 +7,7 @@ const {runMarketNewsSignals}=require('./market-news-signal-worker');
 const {runCompetitorIntelligence}=require('./competitor-intelligence-worker');
 const {runCreativeResearch}=require('./creative-research-worker');
 const {runGoogleIngestionPromotion}=require('./google-ingestion-promotion-worker');
+const {runGa4Market30d}=require('./ga4-market-30d-worker');
 const {processCreativeQueue}=require('./creative-queue');
 const {processGenerationQueue}=require('./creative-generation');
 
@@ -32,6 +33,7 @@ async function runRescue(){
    await run('market',()=>runMarketIntelligence());
    await run('demand_surface',()=>runMarketDemandSurface());
    await run('regional_snapshots',()=>runMarketRegionalSnapshots());
+   await run('ga4_30d_market',()=>runGa4Market30d());
    const demandRun=eventRunner();if(demandRun)await run('demand_events',()=>demandRun());
    await run('news',()=>runMarketNewsSignals());
    await run('competitors',()=>runCompetitorIntelligence({force:false}));
