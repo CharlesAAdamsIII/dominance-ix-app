@@ -2,6 +2,7 @@ const fs=require('fs');
 const path=require('path');
 const expressPath=require.resolve('express');
 const originalExpress=require(expressPath);
+let intelligenceRescue=null;
 function wrappedExpress(...args){
   const app=originalExpress(...args);
   const originalListen=app.listen.bind(app);
@@ -16,6 +17,7 @@ function wrappedExpress(...args){
       require('./market-live-intelligence-api').attach(router);
       require('./competitor-intelligence-api').attach(router);
       require('./creative-evidence-api').attach(router);
+      require('./creative-library-api').attach(router);
       const marketRadarPage=(req,res,next)=>{try{
         const file=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
         const mapsKey=process.env.GOOGLE_MAPS_BROWSER_API_KEY||'';
@@ -33,7 +35,7 @@ function wrappedExpress(...args){
       router.get('/',pageAuth,marketRadarPage);
       router.get('/index.html',pageAuth,marketRadarPage);
       router.get('/competitor.html',pageAuth,injectPage('competitor.html','<script src="/competitor-integrity.js?v=1"></script>'));
-      router.get('/creative.html',pageAuth,injectPage('creative.html','<script src="/creative-integrity.js?v=1"></script>'));
+      router.get('/creative.html',pageAuth,injectPage('creative.html','<script src="/creative-integrity.js?v=2"></script><script src="/creative-library.js?v=1"></script>'));
       router.get('/integrity.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'integrity.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/sidebar-collapse.js"></script></body>'))}catch(e){next(e)}});
       router.get('/advertising.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'advertising.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/context.js"></script></body>'))}catch(e){next(e)}});
       const stack=app._router?.stack||[];
@@ -43,7 +45,8 @@ function wrappedExpress(...args){
       if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.route?.path==='*');
       if(insertAt<0)insertAt=stack.length;
       stack.splice(insertAt,0,...router.stack);
-      console.log(`[DOMINANCE] APIs attached; Market Radar preferred engine=${process.env.GOOGLE_MAPS_BROWSER_API_KEY&&process.env.GOOGLE_MAPS_MAP_ID?'google-vector-deckgl':'leaflet-fallback'} live-telemetry=enabled evidence-gates=enabled`);
+      if(!intelligenceRescue)intelligenceRescue=require('./intelligence-rescue').startIntelligenceRescue();
+      console.log(`[DOMINANCE] APIs attached; Market Radar preferred engine=${process.env.GOOGLE_MAPS_BROWSER_API_KEY&&process.env.GOOGLE_MAPS_MAP_ID?'google-vector-deckgl':'leaflet-fallback'} live-telemetry=enabled evidence-gates=enabled creative-cms=enabled rescue=${intelligenceRescue?'armed':'unavailable'}`);
     }catch(e){console.error('[DOMINANCE] API attach failed',e)}
     return originalListen(...listenArgs);
   };
