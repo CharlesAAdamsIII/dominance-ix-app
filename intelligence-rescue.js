@@ -5,6 +5,7 @@ const {runMarketRegionalSnapshots}=require('./market-regional-snapshot-worker');
 const demandEventModule=require('./market-demand-event-worker');
 const {runMarketNewsSignals}=require('./market-news-signal-worker');
 const {runCompetitorIntelligence}=require('./competitor-intelligence-worker');
+const {runCreativeResearch}=require('./creative-research-worker');
 const {processCreativeQueue}=require('./creative-queue');
 const {processGenerationQueue}=require('./creative-generation');
 
@@ -15,28 +16,11 @@ const STALE_MS=Math.max(5,Number(process.env.INTELLIGENCE_RESCUE_STALE_MINUTES||
 const pool=DATABASE_URL?new Pool({connectionString:DATABASE_URL,ssl:IS_PROD?{rejectUnauthorized:false}:false}):null;
 let timer=null,busy=false,started=false;
 
-function eventRunner(){
- const entries=Object.entries(demandEventModule||{}).filter(([k,v])=>/^run/i.test(k)&&typeof v==='function');
- return entries[0]?.[1]||null;
-}
-async function dedicatedHealthy(){
- try{
-  const r=await pool.query(`SELECT MAX(last_heartbeat_at) last_heartbeat FROM dominance_worker_state WHERE worker_key IN('market-intelligence-worker','market-demand-surface-worker','competitor-intelligence-worker')`);
-  const t=r.rows[0]?.last_heartbeat;if(!t)return false;
-  return Date.now()-new Date(t).getTime()<STALE_MS;
- }catch{return false}
-}
-async function withLease(fn){
- const c=await pool.connect();
- try{
-  const lock=await c.query(`SELECT pg_try_advisory_lock(77104261) locked`);
-  if(!lock.rows[0]?.locked)return{ok:false,reason:'another_rescue_instance_running'};
-  try{return await fn()}finally{await c.query(`SELECT pg_advisory_unlock(77104261)`).catch(()=>{})}
- }finally{c.release()}
-}
+function eventRunner(){const entries=Object.entries(demandEventModule||{}).filter(([k,v])=>/^run/i.test(k)&&typeof v==='function');return entries[0]?.[1]||null}
+async function dedicatedHealthy(){try{const r=await pool.query(`SELECT MAX(last_heartbeat_at) last_heartbeat FROM dominance_worker_state WHERE worker_key IN('market-intelligence-worker','market-demand-surface-worker','competitor-intelligence-worker')`);const t=r.rows[0]?.last_heartbeat;if(!t)return false;return Date.now()-new Date(t).getTime()<STALE_MS}catch{return false}}
+async function withLease(fn){const c=await pool.connect();try{const lock=await c.query(`SELECT pg_try_advisory_lock(77104261) locked`);if(!lock.rows[0]?.locked)return{ok:false,reason:'another_rescue_instance_running'};try{return await fn()}finally{await c.query(`SELECT pg_advisory_unlock(77104261)`).catch(()=>{})}}finally{c.release()}}
 async function runRescue(){
- if(!pool||busy)return{ok:false,reason:!pool?'database_unavailable':'busy'};
- busy=true;
+ if(!pool||busy)return{ok:false,reason:!pool?'database_unavailable':'busy'};busy=true;
  try{
   if(await dedicatedHealthy())return{ok:true,status:'dedicated_worker_healthy'};
   return await withLease(async()=>{
@@ -50,6 +34,7 @@ async function runRescue(){
    const demandRun=eventRunner();if(demandRun)await run('demand_events',()=>demandRun());
    await run('news',()=>runMarketNewsSignals());
    await run('competitors',()=>runCompetitorIntelligence({force:false}));
+   await run('creative_research',()=>runCreativeResearch());
    await run('creative_queue',()=>processCreativeQueue(pool,{maxJobs:8}));
    await run('creative_generation',()=>processGenerationQueue(pool,{maxJobs:4}));
    result.finished_at=new Date().toISOString();
@@ -58,10 +43,5 @@ async function runRescue(){
   });
  }finally{busy=false}
 }
-function startIntelligenceRescue(){
- if(started||!pool)return null;started=true;
- setTimeout(runRescue,20000);timer=setInterval(runRescue,CHECK_MS);
- console.log(`[INTELLIGENCE RESCUE] armed | check=${CHECK_MS/60000}m | stale=${STALE_MS/60000}m`);
- return{run:runRescue,stop:async()=>{if(timer)clearInterval(timer);await pool.end().catch(()=>{})}};
-}
+function startIntelligenceRescue(){if(started||!pool)return null;started=true;setTimeout(runRescue,20000);timer=setInterval(runRescue,CHECK_MS);console.log(`[INTELLIGENCE RESCUE] armed | check=${CHECK_MS/60000}m | stale=${STALE_MS/60000}m`);return{run:runRescue,stop:async()=>{if(timer)clearInterval(timer);await pool.end().catch(()=>{})}}}
 module.exports={startIntelligenceRescue,runIntelligenceRescue:runRescue};
