@@ -11,6 +11,7 @@ const {startMarketNewsSignalWorker}=require('./market-news-signal-worker');
 const {startCompetitorIntelligenceWorker}=require('./competitor-intelligence-worker');
 const {startCreativeResearchWorker}=require('./creative-research-worker');
 const {startGoogleIngestionPromotionWorker}=require('./google-ingestion-promotion-worker');
+const {startGa4Market30dWorker}=require('./ga4-market-30d-worker');
 const {startWorkerMonitorSupport}=require('./worker-monitor');
 const {ensureProvenanceTrigger}=require('./provenance-trigger');
 const releases=require('./intelligence-release-gate');
@@ -27,8 +28,9 @@ cp.WORKER_CONTRACTS['market-news-signal-worker']={version:'1.0.0',scope:'every_a
 cp.WORKER_CONTRACTS['competitor-intelligence-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:30,max_staleness_minutes:90,critical:false,outputs:['competitor_discovery','google_bing_rank_change','competitor_site_change','google_ads_transparency','local_pack_visibility','seo_recommendations','advertising_competitor_signals','creative_differentiation']};
 cp.WORKER_CONTRACTS['creative-research-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:30,max_staleness_minutes:90,critical:false,outputs:['search_intent_research','competitor_creative_research','market_signal_research','creative_portfolio_requests']};
 cp.WORKER_CONTRACTS['google-ingestion-promotion-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:5,max_staleness_minutes:20,critical:false,outputs:['google_ads_account_import','google_ads_campaign_import','campaign_performance_visibility']};
+cp.WORKER_CONTRACTS['ga4-market-30d-worker']={version:'1.0.0',scope:'every_active_customer',interval_minutes:60,max_staleness_minutes:150,critical:false,outputs:['ga4_30d_geographic_activity','first_party_market_concentration','30d_vs_prior_30d_velocity']};
 
-let coreSourceSync=null,profiler=null,advertising=null,controlPlane=null,marketIntelligence=null,demandSurface=null,regionalSnapshots=null,demandEvents=null,newsSignals=null,competitorIntelligence=null,creativeResearch=null,googlePromotion=null,monitorSupport=null;
+let coreSourceSync=null,profiler=null,advertising=null,controlPlane=null,marketIntelligence=null,demandSurface=null,regionalSnapshots=null,demandEvents=null,newsSignals=null,competitorIntelligence=null,creativeResearch=null,googlePromotion=null,ga4Market30d=null,monitorSupport=null;
 async function start(){
   const bootstrap=adCore.makePool();
   if(bootstrap){
@@ -51,6 +53,7 @@ async function start(){
   competitorIntelligence=startCompetitorIntelligenceWorker();
   creativeResearch=startCreativeResearchWorker();
   googlePromotion=startGoogleIngestionPromotionWorker();
+  ga4Market30d=startGa4Market30dWorker();
   controlPlane=startControlPlaneWorker();
   monitorSupport=startWorkerMonitorSupport();
   console.log('[WORKER SUITE] full DOMINANCE intelligence suite online');
@@ -67,6 +70,7 @@ async function stopWorkers(signal='SIGTERM'){
   if(competitorIntelligence?.stop)await competitorIntelligence.stop();
   if(creativeResearch?.stop)await creativeResearch.stop();
   if(googlePromotion?.stop)await googlePromotion.stop();
+  if(ga4Market30d?.stop)await ga4Market30d.stop();
   if(controlPlane?.stop)await controlPlane.stop();
   if(monitorSupport?.stop)await monitorSupport.stop(signal);
 }
