@@ -15,6 +15,7 @@ function wrappedExpress(...args){
       require('./market-intelligence-api').attach(router);
       require('./market-live-intelligence-api').attach(router);
       require('./competitor-intelligence-api').attach(router);
+      require('./creative-evidence-api').attach(router);
       const marketRadarPage=(req,res,next)=>{try{
         const file=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
         const mapsKey=process.env.GOOGLE_MAPS_BROWSER_API_KEY||'';
@@ -25,11 +26,14 @@ function wrappedExpress(...args){
         const configNotice=!googleEnabled?`<script>setTimeout(()=>{const e=document.getElementById('scanText');if(e)e.textContent='Google vector map is not enabled on this web service. Missing: ${missing.join(', ')}. DOMINANCE fallback map is active.'},0)</script>`:'';
         const leafletFallback='<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script><script src="/market-basemap.js?v=1"></script><script src="/market-map-layer-extension.js?v=2"></script><script src="/market-map-visuals.js?v=1"></script><script src="/market-map-layout.js?v=1"></script>';
         const googleSpatial=googleEnabled?'<script src="/google-maps-loader.js?v=2"></script><script src="https://unpkg.com/deck.gl@^9.0.0/dist.min.js"></script><script src="/google-market-map.js?v=3"></script>':'';
-        const liveRadar='<script src="/market-live-radar.js?v=1"></script>';
+        const liveRadar='<script src="/market-live-radar.js?v=2"></script><script src="/market-integrity-gate.js?v=1"></script>';
         res.type('html').send(file.replace('</body>',googleConfig+leafletFallback+googleSpatial+liveRadar+configNotice+'</body>'));
       }catch(e){next(e)}};
+      const injectPage=(fileName,scripts)=>(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,fileName),'utf8');res.type('html').send(file.replace('</body>',scripts+'</body>'))}catch(e){next(e)}};
       router.get('/',pageAuth,marketRadarPage);
       router.get('/index.html',pageAuth,marketRadarPage);
+      router.get('/competitor.html',pageAuth,injectPage('competitor.html','<script src="/competitor-integrity.js?v=1"></script>'));
+      router.get('/creative.html',pageAuth,injectPage('creative.html','<script src="/creative-integrity.js?v=1"></script>'));
       router.get('/integrity.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'integrity.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/sidebar-collapse.js"></script></body>'))}catch(e){next(e)}});
       router.get('/advertising.html',pageAuth,(req,res,next)=>{try{const file=fs.readFileSync(path.join(__dirname,'advertising.html'),'utf8');res.type('html').send(file.replace('</body>','<script src="/context.js"></script></body>'))}catch(e){next(e)}});
       const stack=app._router?.stack||[];
@@ -39,7 +43,7 @@ function wrappedExpress(...args){
       if(insertAt<0)insertAt=stack.findIndex(layer=>layer?.route?.path==='*');
       if(insertAt<0)insertAt=stack.length;
       stack.splice(insertAt,0,...router.stack);
-      console.log(`[DOMINANCE] APIs attached; Market Radar preferred engine=${process.env.GOOGLE_MAPS_BROWSER_API_KEY&&process.env.GOOGLE_MAPS_MAP_ID?'google-vector-deckgl':'leaflet-fallback'} live-telemetry=enabled`);
+      console.log(`[DOMINANCE] APIs attached; Market Radar preferred engine=${process.env.GOOGLE_MAPS_BROWSER_API_KEY&&process.env.GOOGLE_MAPS_MAP_ID?'google-vector-deckgl':'leaflet-fallback'} live-telemetry=enabled evidence-gates=enabled`);
     }catch(e){console.error('[DOMINANCE] API attach failed',e)}
     return originalListen(...listenArgs);
   };
