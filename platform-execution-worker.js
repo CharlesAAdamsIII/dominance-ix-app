@@ -50,7 +50,7 @@ async function processOne(queue){
   await pool.query(`UPDATE dominance_ad_recommendations SET status='monitoring',executed_at=NOW(),updated_at=NOW() WHERE id=$1`,[recommendation.id]);
   await pool.query(`INSERT INTO dominance_activity(account_id,event_type,module,details) VALUES($1,'platform_execution_completed','platform_execution',$2::jsonb)`,[account.id,JSON.stringify({queue_id:queue.id,recommendation_id:recommendation.id,platform:build.platform,operation:build.operation})]).catch(()=>{});
   console.log('[PLATFORM EXECUTION] completed queue='+queue.id+' recommendation='+recommendation.id+' platform='+build.platform+' operation='+build.operation);
-  return{ok:true,queue_id:queue.id,recommendation_id:recommendation.id,platform:build.platform,operation:build.operation};
+  return{ok:true,account_id:account.id,queue_id:queue.id,recommendation_id:recommendation.id,platform:build.platform,operation:build.operation};
 }
 
 async function fail(queue,error){
@@ -65,7 +65,7 @@ async function fail(queue,error){
     if(pr.rows[0]?.require_approval===false)await adCore.suspendAutonomy(pool,queue.dominance_account_id,'Platform execution failed after maximum retries; approval mode restored.').catch(()=>{});
   }
   console.error('[PLATFORM EXECUTION] queue='+queue.id+' error='+msg+' status='+(r.rows[0]?.status||'unknown'));
-  return{ok:false,queue_id:queue.id,error:msg,status:r.rows[0]?.status||'failed'};
+  return{ok:false,account_id:queue.dominance_account_id,queue_id:queue.id,error:msg,status:r.rows[0]?.status||'failed'};
 }
 
 async function runPlatformExecution(){
@@ -79,10 +79,10 @@ async function runPlatformExecution(){
     }
     const accounts=await pool.query('SELECT id FROM dominance_accounts WHERE is_active=TRUE ORDER BY id');
     const cycleStatus=results.some(x=>x.ok===false)?'partial_error':'completed';
-    for(const a of accounts.rows)await cp.recordWorkerAccountRun(pool,'platform-execution-worker',a.id,cycleStatus,{processed:results.length,results},started).catch(()=>{});
+    for(const a of accounts.rows){const scoped=results.filter(x=>Number(x.account_id)===Number(a.id));const scopedStatus=scoped.some(x=>x.ok===false)?'partial_error':'completed';await cp.recordWorkerAccountRun(pool,'platform-execution-worker',a.id,scopedStatus,{processed:scoped.length,results:scoped},started).catch(()=>{})}
     await pool.query(`INSERT INTO dominance_worker_state(worker_key,last_heartbeat_at,last_run_at,status,details)
       VALUES('platform-execution-worker',NOW(),NOW(),$1,$2::jsonb)
-      ON CONFLICT(worker_key) DO UPDATE SET last_heartbeat_at=NOW(),last_run_at=NOW(),status=EXCLUDED.status,details=EXCLUDED.details`,[cycleStatus,JSON.stringify({processed:results.length,results})]).catch(()=>{});
+      ON CONFLICT(worker_key) DO UPDATE SET last_heartbeat_at=NOW(),last_run_at=NOW(),status=EXCLUDED.status,details=EXCLUDED.details`,[cycleStatus,JSON.stringify({processed:results.length,failed:results.filter(x=>x.ok===false).length})]).catch(()=>{});
     return{ok:true,processed:results.length,results};
   }catch(e){console.error('[PLATFORM EXECUTION]',e);return{ok:false,error:String(e.message||e)}}finally{busy=false}
 }
