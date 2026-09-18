@@ -118,8 +118,9 @@ function launchOperations(spec,customerId){
   const c=spec.campaign||{},budgetOps=[],campaignOps=[],adGroupOps=[],criterionOps=[],adOps=[],campaignCriterionOps=[];
   const budgetResource=tempName(customerId,'campaignBudgets',-1),campaignResource=tempName(customerId,'campaigns',-2);
   budgetOps.push({campaignBudgetOperation:{create:{resourceName:budgetResource,name:c.name+' · DOMINANCE Budget',deliveryMethod:'STANDARD',amountMicros:micros(c.daily_budget),explicitlyShared:false}}});
-  const campaign={resourceName:campaignResource,name:c.name,status:c.status||'PAUSED',advertisingChannelType:c.channel_type||'SEARCH',campaignBudget:budgetResource,networkSettings:c.network_settings||{targetGoogleSearch:true,targetSearchNetwork:true,targetContentNetwork:false,targetPartnerSearchNetwork:false},...bidFields(c.bid_strategy)};
-  if(c.contains_eu_political_advertising)campaign.containsEuPoliticalAdvertising=c.contains_eu_political_advertising;
+  const euDeclaration=String(c.contains_eu_political_advertising||'').trim().toUpperCase();
+  if(!['DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING','CONTAINS_EU_POLITICAL_ADVERTISING'].includes(euDeclaration))throw Error('Google Ads campaign build is missing a valid EU political advertising declaration.');
+  const campaign={resourceName:campaignResource,name:c.name,status:c.status||'PAUSED',advertisingChannelType:c.channel_type||'SEARCH',campaignBudget:budgetResource,containsEuPoliticalAdvertising:euDeclaration,networkSettings:c.network_settings||{targetGoogleSearch:true,targetSearchNetwork:true,targetContentNetwork:false,targetPartnerSearchNetwork:false},...bidFields(c.bid_strategy)};
   campaignOps.push({campaignOperation:{create:campaign}});
   let temp=-3;
   for(const g of c.ad_groups||[]){
