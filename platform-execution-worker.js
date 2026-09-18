@@ -38,6 +38,11 @@ async function processOne(queue){
   let result;
   if(build.platform==='Google Ads')result=await google.execute(pool,{account,spec:build.spec});
   else throw Error('No physical write adapter is enabled for '+build.platform+'.');
+  if(build.operation==='launch_campaign'&&build.spec?.campaign_entity_id&&result?.campaign_resource){
+    const externalId=String(result.campaign_resource).split('/').pop(),googleStatus=String(result.readback?.campaign?.status||build.spec.campaign?.status||'PAUSED').toUpperCase(),localStatus=googleStatus==='ENABLED'?'live':'paused';
+    const adAccount=await pool.query(`SELECT id FROM dominance_ad_accounts WHERE dominance_account_id=$1 AND platform='Google Ads' AND external_account_id=$2 ORDER BY updated_at DESC LIMIT 1`,[account.id,String(result.customer_id)]).catch(()=>({rows:[]}));
+    await pool.query(`UPDATE dominance_campaign_entities SET external_id=$2,status=$3,ad_account_id=COALESCE($4,ad_account_id),last_synced_at=NOW(),settings=settings||$5::jsonb,updated_at=NOW() WHERE id=$1 AND dominance_account_id=$6`,[build.spec.campaign_entity_id,externalId,localStatus,adAccount.rows[0]?.id||null,JSON.stringify({platform_resource_name:result.campaign_resource,last_execution_queue_id:queue.id,last_execution_at:new Date().toISOString(),google_status:googleStatus}),account.id]);
+  }
   await gateway.recordReceipt(pool,{queue,recommendation,account,status:'completed',request:{build_id:build.id,spec:build.spec},response:result});
   await pool.query(`UPDATE dominance_ad_execution_queue SET status='completed',completed_at=NOW(),last_error=NULL WHERE id=$1`,[queue.id]);
   await pool.query(`UPDATE dominance_execution_builds SET status='executed',updated_at=NOW() WHERE recommendation_id=$1`,[recommendation.id]);
