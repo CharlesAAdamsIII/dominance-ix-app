@@ -16,7 +16,8 @@ function run(){
       competitor_events:[],
       winning_patterns:[]
     },
-    strategic_direction:{primary_goal:'qualified lead'}
+    strategic_direction:{primary_goal:'qualified lead'},
+    platform_requirements:['15 headlines <=30 chars','4 descriptions <=90 chars','keyword-to-message alignment']
   };
   const manifest=build.creativeProvenanceManifest({account:{id:4,account_key:'test'},request:{id:1,platform:'Google Ads'},asset:{id:2},brief});
   assert.equal(manifest.research_backed,true);
