@@ -59,6 +59,46 @@ async function connectionFor(pool,accountId){
   if(!selected)throw Error('Google Ads connection has no selected advertiser resource.');
   return{connection:c,customerId:String(selected).replace(/^customers\//,'').replace(/\D/g,'')};
 }
+async function suggestGeoTargets(token,names,{countryCode=null,locale='en'}={}){
+  const cleanNames=[...new Set((names||[]).map(x=>String(x||'').trim()).filter(Boolean))].slice(0,25);
+  if(!cleanNames.length)return[];
+  const body={locale,locationNames:{names:cleanNames}};
+  if(countryCode)body.countryCode=String(countryCode).trim().toUpperCase();
+  const d=await googleJson('https://googleads.googleapis.com/'+API_VERSION+'/geoTargetConstants:suggest',token,{body});
+  return d.geoTargetConstantSuggestions||[];
+}
+async function resolveGeoTargets(pool,accountId,targets,{countryCode=null,locale='en'}={}){
+  const {connection}=await connectionFor(pool,accountId),token=await accessToken(pool,connection);
+  const resolved=[],pending=[];
+  for(const raw of targets||[]){
+    const t=typeof raw==='string'?{name:raw}:raw||{},criterion=String(t.criterion_id||t.id||'').replace(/\D/g,'');
+    if(criterion){resolved.push({type:'location',criterion_id:criterion,name:t.name||null,negative:t.negative===true,source:t.source||'explicit'});continue}
+    const lat=Number(t.latitude),lng=Number(t.longitude),radius=Number(t.radius_miles||t.radius||0);
+    if(Number.isFinite(lat)&&Number.isFinite(lng)&&radius>0){
+      resolved.push({type:'proximity',name:t.name||null,latitude:lat,longitude:lng,radius_miles:radius,source:t.source||'market_target_area'});
+      continue;
+    }
+    if(t.name)pending.push(t);
+  }
+  if(pending.length){
+    const suggestions=await suggestGeoTargets(token,pending.map(x=>x.name),{countryCode,locale});
+    for(const t of pending){
+      const candidates=suggestions.filter(x=>String(x.searchTerm||'').toLowerCase()===String(t.name||'').toLowerCase());
+      const enabled=candidates.filter(x=>String(x.geoTargetConstant?.status||'ENABLED').toUpperCase()==='ENABLED');
+      const expected=String(t.geography_type||'').toLowerCase();
+      const ranked=(enabled.length?enabled:candidates).sort((a,b)=>{
+        const ta=String(a.geoTargetConstant?.targetType||'').toLowerCase(),tb=String(b.geoTargetConstant?.targetType||'').toLowerCase();
+        const matchA=expected&&ta.includes(expected)?1:0,matchB=expected&&tb.includes(expected)?1:0;
+        return matchB-matchA+Number(b.reach||0)-Number(a.reach||0);
+      });
+      const best=ranked[0],rn=best?.geoTargetConstant?.resourceName||'',id=String(rn).split('/').pop()?.replace(/\D/g,'');
+      if(id)resolved.push({type:'location',criterion_id:id,name:best.geoTargetConstant?.name||t.name,country_code:best.geoTargetConstant?.countryCode||countryCode||null,target_type:best.geoTargetConstant?.targetType||null,status:best.geoTargetConstant?.status||null,reach:Number(best.reach||0),source:t.source||'google_geo_suggestion',requested_name:t.name});
+      else resolved.push({type:'unresolved',name:t.name,source:t.source||'market_target_area'});
+    }
+  }
+  return resolved;
+}
+
 const micros=v=>String(Math.max(0,Math.round(Number(v||0)*1000000)));
 function tempName(customerId,type,id){return'customers/'+customerId+'/'+type+'/'+id;}
 
@@ -94,9 +134,19 @@ function launchOperations(spec,customerId){
     for(const ad of g.ads||[])adOps.push({adGroupAdOperation:{create:rsaCreate(adGroupResource,ad,c.status||'PAUSED')}});
   }
   for(const geo of c.geo_targets||[]){
+    if(geo.type==='proximity'){
+      const lat=Math.round(Number(geo.latitude)*1000000),lng=Math.round(Number(geo.longitude)*1000000),radius=Number(geo.radius_miles||0);
+      if(!Number.isFinite(lat)||!Number.isFinite(lng)||radius<=0)throw Error('Google Ads proximity target is missing valid latitude, longitude, or radius.');
+      campaignCriterionOps.push({campaignCriterionOperation:{create:{campaign:campaignResource,proximity:{geoPoint:{latitudeInMicroDegrees:lat,longitudeInMicroDegrees:lng},radius,radiusUnits:'MILES'}}}});
+      continue;
+    }
     const criterionId=String(geo.criterion_id||geo.id||'').replace(/\D/g,'');
     if(!criterionId)throw Error('Google Ads geo target is missing a numeric geo target criterion ID.');
     campaignCriterionOps.push({campaignCriterionOperation:{create:{campaign:campaignResource,negative:geo.negative===true,location:{geoTargetConstant:'geoTargetConstants/'+criterionId}}}});
+  }
+  for(const languageId of c.language_criterion_ids||[]){
+    const id=String(languageId||'').replace(/\D/g,'');if(!id)throw Error('Google Ads language target is missing a numeric language criterion ID.');
+    campaignCriterionOps.push({campaignCriterionOperation:{create:{campaign:campaignResource,language:{languageConstant:'languageConstants/'+id}}}});
   }
   return[...budgetOps,...campaignOps,...adGroupOps,...criterionOps,...campaignCriterionOps,...adOps];
 }
@@ -177,4 +227,4 @@ async function execute(pool,{account,spec}){
   throw Error('Google Ads execution operation is not implemented: '+spec.operation);
 }
 
-module.exports={execute,launchOperations};
+module.exports={execute,launchOperations,resolveGeoTargets,suggestGeoTargets};
