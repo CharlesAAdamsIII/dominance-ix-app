@@ -31,7 +31,7 @@ function run(){
   assert.equal(build.validateCreativeForPlatform('Google Ads',ad).valid,true);
   assert.equal(build.validateCreativeForPlatform('Google Ads',{...ad,headlines:['X'.repeat(31),'B','C']}).valid,false);
 
-  const recommendation={id:10,dominance_account_id:4,source_platform:'Google Ads',recommendation_type:'campaign_launch',action:{operation:'launch_campaign',campaign_entity_id:'77',creative_ids:[9],campaign:{name:'DOMINANCE Search',status:'ENABLED',daily_budget:100,final_url:'https://example.com',ad_groups:[{name:'High Intent',keywords:[{text:'healthcare marketing',match_type:'PHRASE'}],ads:[ad]}]}}};
+  const recommendation={id:10,dominance_account_id:4,source_platform:'Google Ads',recommendation_type:'campaign_launch',action:{operation:'launch_campaign',campaign_entity_id:'77',creative_ids:[9],campaign:{name:'DOMINANCE Search',status:'ENABLED',channel_type:'SEARCH',daily_budget:100,final_url:'https://example.com',geo_targets:[{criterion_id:'2840'}],language_criterion_ids:['1000'],ad_groups:[{name:'High Intent',keywords:[{text:'healthcare marketing',match_type:'PHRASE'}],ads:[ad]}]}}};
   const spec=build.buildSpecFromRecommendation(recommendation,{id:4,website:'https://example.com'});
   const validation=build.validateBuildSpec(spec,{research_manifest:{research_backed:true},monthly_budget_max:5000,spend_to_date:0});
   assert.equal(validation.ready,true);
@@ -46,6 +46,7 @@ function run(){
   assert(ops.some(x=>x.adGroupOperation));
   assert(ops.some(x=>x.adGroupCriterionOperation));
   assert(ops.some(x=>x.adGroupAdOperation));
+  assert(ops.filter(x=>x.campaignCriterionOperation).length>=2);
   const composite=ops.filter(x=>x.adGroupCriterionOperation||x.adGroupAdOperation||x.campaignCriterionOperation);
   for(const x of composite){
     const create=x.adGroupCriterionOperation?.create||x.adGroupAdOperation?.create||x.campaignCriterionOperation?.create;
