@@ -106,7 +106,22 @@ async function validateAndMutate(token,customerId,operations){
   const body={mutateOperations:operations,partialFailure:false,responseContentType:'MUTABLE_RESOURCE'};
   const validation=await googleJson(base+'?validateOnly=true',token,{body});
   const response=await googleJson(base,token,{body});
-  return{validation,response};
+  const campaignResource=findResourceName(response,'/campaigns/'),readback=campaignResource?await readBackCampaign(token,customerId,campaignResource):null;
+  return{validation,response,campaign_resource:campaignResource,readback};
+}
+
+function findResourceName(value,needle){
+  if(typeof value==='string'&&value.includes(needle))return value;
+  if(Array.isArray(value)){for(const x of value){const v=findResourceName(x,needle);if(v)return v}}
+  else if(value&&typeof value==='object'){for(const x of Object.values(value)){const v=findResourceName(x,needle);if(v)return v}}
+  return null;
+}
+async function readBackCampaign(token,customerId,campaignResource){
+  const id=String(campaignResource||'').split('/').pop()?.replace(/\D/g,'');
+  if(!id)return null;
+  const query='SELECT campaign.id,campaign.name,campaign.status,campaign.campaign_budget,campaign_budget.amount_micros FROM campaign WHERE campaign.id = '+id;
+  const d=await googleJson('https://googleads.googleapis.com/'+API_VERSION+'/customers/'+customerId+'/googleAds:search',token,{body:{query,pageSize:10}});
+  return d.results?.[0]||null;
 }
 
 async function campaignBudgetState(token,customerId,campaignIds){
@@ -137,8 +152,8 @@ async function executeReallocation(pool,token,customerId,accountId,spec){
     {update:{resourceName:b.budget_resource,amountMicros:String(toNew)},updateMask:'amount_micros'}
   ],partialFailure:false};
   await googleJson(url+'?validateOnly=true',token,{body});
-  const response=await googleJson(url,token,{body});
-  return{response,normalized_daily_delta:dailyDelta,from:{campaign:from.name,before_micros:a.amount_micros,after_micros:fromNew},to:{campaign:to.name,before_micros:b.amount_micros,after_micros:toNew}};
+  const response=await googleJson(url,token,{body}),after=await campaignBudgetState(token,customerId,[from.external_id,to.external_id]);
+  return{response,readback:after,normalized_daily_delta:dailyDelta,from:{campaign:from.name,before_micros:a.amount_micros,after_micros:fromNew},to:{campaign:to.name,before_micros:b.amount_micros,after_micros:toNew}};
 }
 async function executeBudgetUpdate(pool,token,customerId,accountId,spec){
   const c=await entityExternalId(pool,accountId,spec.campaign_entity_id),state=await campaignBudgetState(token,customerId,[c.external_id]),s=state[String(c.external_id)];
@@ -146,7 +161,8 @@ async function executeBudgetUpdate(pool,token,customerId,accountId,spec){
   const body={operations:[{update:{resourceName:s.budget_resource,amountMicros:micros(spec.daily_budget)},updateMask:'amount_micros'}],partialFailure:false};
   const url='https://googleads.googleapis.com/'+API_VERSION+'/customers/'+customerId+'/campaignBudgets:mutate';
   await googleJson(url+'?validateOnly=true',token,{body});
-  return{response:await googleJson(url,token,{body}),campaign:c.name,before_micros:s.amount_micros,after_micros:Number(micros(spec.daily_budget))};
+  const response=await googleJson(url,token,{body}),after=await campaignBudgetState(token,customerId,[c.external_id]);
+  return{response,readback:after,campaign:c.name,before_micros:s.amount_micros,after_micros:Number(micros(spec.daily_budget))};
 }
 
 async function execute(pool,{account,spec}){
