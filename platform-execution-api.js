@@ -2,7 +2,6 @@
 
 const core=require('./execution-gateway-core');
 const build=require('./platform-build-core');
-const {runCampaignBuild}=require('./campaign-build-worker');
 const adCore=require('./ad-intelligence-core');
 const pool=adCore.makePool();
 
@@ -40,8 +39,6 @@ function attach(router){
       res.json({ok:true,provenance:r.rows[0]});
     }catch(e){res.status(500).json({ok:false,error:e.message})}
   });
-  router.post('/api/execution/campaign-build/run',auth,async(req,res)=>{
-    try{res.json({ok:true,result:await runCampaignBuild()})}catch(e){res.status(500).json({ok:false,error:e.message})}
-  });
+
 }
 module.exports={attach};
