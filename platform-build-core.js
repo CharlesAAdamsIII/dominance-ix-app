@@ -117,10 +117,14 @@ function validateBuildSpec(spec,{research_manifest=null,monthly_budget_max=0,spe
     if(!c.name)errors.push('Campaign name is required.');
     if(n(c.daily_budget)<=0)errors.push('Daily campaign budget must be greater than zero.');
     if(!c.final_url)errors.push('Campaign final URL is required.');
+    else{try{const u=new URL(c.final_url);if(!['http:','https:'].includes(u.protocol))errors.push('Campaign final URL must use HTTP or HTTPS.')}catch{errors.push('Campaign final URL is not a valid URL.');}}
+    if(platform==='Google Ads'&&String(c.channel_type||'SEARCH').toUpperCase()!=='SEARCH')errors.push('The current Google Ads write adapter supports Search campaigns only.');
+    if(platform==='Google Ads'&&!(c.geo_targets||[]).length)errors.push('Google Search campaign requires at least one explicit resolved geographic target.');
+    if(platform==='Google Ads'&&!(c.language_criterion_ids||[]).length)errors.push('Google Search campaign requires at least one explicit language target.');
     if(!Array.isArray(c.ad_groups)||!c.ad_groups.length)errors.push('At least one ad group is required.');
     for(const [i,g] of (c.ad_groups||[]).entries()){
       if(!g.name)errors.push('Ad group '+(i+1)+' is missing a name.');
-      if(!g.keywords?.length&&platform==='Google Ads')warnings.push('Ad group '+(i+1)+' has no keywords.');
+      if(!g.keywords?.length&&platform==='Google Ads')errors.push('Ad group '+(i+1)+' has no keywords.');
       if(!g.ads?.length)errors.push('Ad group '+(i+1)+' has no ads.');
       for(const [j,ad] of (g.ads||[]).entries()){const r=validateCreativeForPlatform(platform,ad);for(const e of r.errors)errors.push('Ad group '+(i+1)+', ad '+(j+1)+': '+e);}
     }
