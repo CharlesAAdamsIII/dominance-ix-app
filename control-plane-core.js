@@ -28,6 +28,8 @@ const WORKER_CONTRACTS={
 'market-public-sweep':{version:'1.0.0',scope:'every_active_customer',interval_minutes:60,max_staleness_minutes:180,critical:false,outputs:['public_market_context']},
 'creative-queue':{version:'1.0.0',scope:'queued_jobs',interval_minutes:1,max_staleness_minutes:10,critical:false,outputs:['creative_briefs','recommendation_promotions']},
 'creative-generation':{version:'1.0.0',scope:'queued_jobs',interval_minutes:1,max_staleness_minutes:10,critical:false,outputs:['generated_creatives']},
+'campaign-build-worker':{version:'1.0.0',scope:'every_active_customer',interval_minutes:15,max_staleness_minutes:45,critical:false,outputs:['research_backed_campaign_builds','platform_valid_recommendations','approval_ready_execution_plans']},
+'platform-execution-worker':{version:'1.0.0',scope:'every_active_customer',interval_minutes:1,max_staleness_minutes:5,critical:true,outputs:['validated_platform_mutations','execution_receipts','readback_status']},
 'control-plane-worker':{version:CONTROL_PLANE_VERSION,scope:'every_active_customer_and_worker',interval_minutes:5,max_staleness_minutes:15,critical:true,outputs:['integrity_snapshot','drift_checks','reconciliation','autonomy_regression']}
 };
 async function ensureControlPlaneSchema(pool){if(!pool)return;
