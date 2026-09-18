@@ -80,18 +80,19 @@ async function researchManifestForRecommendation(pool,recommendation){
   };
 }
 
-async function budgetSnapshot(pool,accountId){
+async function budgetSnapshot(pool,accountId,excludeCampaignEntityId=null){
   const p=await pool.query('SELECT monthly_budget_max,currency FROM dominance_ad_policy WHERE dominance_account_id=$1',[accountId]).catch(()=>({rows:[]}));
   const s=await pool.query(`SELECT COALESCE(SUM(spend),0)::numeric spend FROM dominance_ad_spend_ledger WHERE dominance_account_id=$1 AND occurred_at>=date_trunc('month',NOW())`,[accountId]).catch(()=>({rows:[{}]}));
-  return{monthly_budget_max:Number(p.rows[0]?.monthly_budget_max||0),currency:p.rows[0]?.currency||'USD',spend_to_date:Number(s.rows[0]?.spend||0)};
+  const a=await pool.query(`SELECT COALESCE(SUM(budget),0)::numeric allocated FROM dominance_campaign_entities WHERE dominance_account_id=$1 AND entity_type='campaign' AND status NOT IN('removed','archived') AND ($2::bigint IS NULL OR id<>$2::bigint)`,[accountId,excludeCampaignEntityId||null]).catch(()=>({rows:[{}]}));
+  return{monthly_budget_max:Number(p.rows[0]?.monthly_budget_max||0),currency:p.rows[0]?.currency||'USD',spend_to_date:Number(s.rows[0]?.spend||0),committed_monthly_budget:Number(a.rows[0]?.allocated||0)};
 }
 
 async function prepareBuild(pool,recommendation,account){
   await ensureSchema(pool);
   const spec=build.buildSpecFromRecommendation(recommendation,account);
   const research=await researchManifestForRecommendation(pool,recommendation);
-  const budget=await budgetSnapshot(pool,account.id);
-  let validation=build.validateBuildSpec(spec,{research_manifest:spec.operation==='launch_campaign'?(research||{research_backed:false}):research,monthly_budget_max:budget.monthly_budget_max,spend_to_date:budget.spend_to_date});
+  const budget=await budgetSnapshot(pool,account.id,spec.campaign_entity_id||null);
+  let validation=build.validateBuildSpec(spec,{research_manifest:spec.operation==='launch_campaign'?(research||{research_backed:false}):research,monthly_budget_max:budget.monthly_budget_max,spend_to_date:budget.spend_to_date,committed_monthly_budget:budget.committed_monthly_budget});
   if(spec.operation==='launch_campaign'&&!research){
     validation={...validation,ready:false,errors:[...validation.errors,'Campaign launch must reference approved creative IDs or generated asset IDs with stored research provenance.']};
   }
