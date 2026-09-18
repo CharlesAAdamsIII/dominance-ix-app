@@ -20,6 +20,7 @@ function wrappedExpress(...args){
       require('./creative-evidence-api').attach(router);
       require('./creative-library-api').attach(router);
       require('./source-health-api').attach(router);
+      require('./platform-execution-api').attach(router);
       const marketRadarPage=(req,res,next)=>{try{
         const file=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
         const mapsKey=process.env.GOOGLE_MAPS_BROWSER_API_KEY||'';
@@ -49,7 +50,7 @@ function wrappedExpress(...args){
       if(insertAt<0)insertAt=stack.length;
       stack.splice(insertAt,0,...router.stack);
       if(!intelligenceRescue)intelligenceRescue=require('./intelligence-rescue').startIntelligenceRescue();
-      console.log(`[DOMINANCE] APIs attached; Market Radar preferred engine=${process.env.GOOGLE_MAPS_BROWSER_API_KEY&&process.env.GOOGLE_MAPS_MAP_ID?'google-vector-deckgl':'leaflet-fallback'} live-telemetry=enabled evidence-gates=enabled creative-cms=enabled source-health=enabled rescue=${intelligenceRescue?'armed':'unavailable'}`);
+      console.log(`[DOMINANCE] APIs attached; Market Radar preferred engine=${process.env.GOOGLE_MAPS_BROWSER_API_KEY&&process.env.GOOGLE_MAPS_MAP_ID?'google-vector-deckgl':'leaflet-fallback'} live-telemetry=enabled evidence-gates=enabled creative-cms=enabled source-health=enabled execution-gateway=enabled rescue=${intelligenceRescue?'armed':'unavailable'}`);
     }catch(e){console.error('[DOMINANCE] API attach failed',e)}
     return originalListen(...listenArgs);
   };
