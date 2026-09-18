@@ -9,7 +9,7 @@ services:
     name: dominance-market-radar
     runtime: node
     plan: starter
-    buildCommand: npm install
+    buildCommand: npm install && npm run test:control && npm run test:execution
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
@@ -69,7 +69,7 @@ services:
     name: dominance-intelligence-worker
     runtime: node
     plan: starter
-    buildCommand: npm install
+    buildCommand: npm install && npm run test:control && npm run test:execution
     startCommand: node worker-suite.js
     autoDeploy: true
     envVars:
