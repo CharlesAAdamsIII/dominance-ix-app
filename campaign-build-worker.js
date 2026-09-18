@@ -46,6 +46,8 @@ async function buildGoogleDraft(account,campaign){
   if(dup.rowCount)return{status:'already_recommended'};
   const conn=await pool.query(`SELECT 1 FROM dominance_connections WHERE account_id=$1 AND provider_key='GADS' AND status IN('connected','enabled') AND credential_ciphertext IS NOT NULL AND metadata->>'selected_resource' IS NOT NULL LIMIT 1`,[account.id]);
   if(!conn.rowCount)return{status:'waiting_for_google_ads_connection'};
+  const policy=await adCore.getOrCreatePolicy(pool,account.id);
+  const euPoliticalDeclaration=String(policy.settings?.google_ads_eu_political_advertising||'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING').trim().toUpperCase();
   const targeting=await googleTargeting(account,campaign);
   if(targeting.status!=='ready')return targeting;
   const kw=await pool.query(`SELECT phrase,dominant_intent,journey_stage,commerciality_score,priority FROM dominance_keyword_intelligence WHERE account_id=$1 AND active=TRUE ORDER BY commerciality_score DESC,priority DESC LIMIT 25`,[account.id]).catch(()=>({rows:[]}));
@@ -64,7 +66,7 @@ async function buildGoogleDraft(account,campaign){
   const now=new Date(),daysInMonth=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+1,0)).getUTCDate(),daysRemaining=Math.max(1,daysInMonth-now.getUTCDate()+1),remainingMonthSpend=Math.min(monthly,Math.round(daily*daysRemaining*100)/100);
   const keywords=kw.rows.map(x=>({text:x.phrase,match_type:x.dominant_intent==='transactional'||x.dominant_intent==='local'?'EXACT':'PHRASE',negative:false,intent:x.dominant_intent,stage:x.journey_stage})).filter(x=>x.text).slice(0,20);
   const creativeIds=[...new Set(ads.map(x=>x.source_creative_id))];
-  const evidenceCoverage={connected_google_ads:true,platform_valid_creatives:creativeIds.length,qualified_search_intents:keywords.length,market:campaign.market||null,google_geo_targets:targeting.geo_targets.length,google_language_targets:targeting.language_ids.length,geo_target_source:targeting.candidates||[],language_source:targeting.language_source};
+  const evidenceCoverage={connected_google_ads:true,platform_valid_creatives:creativeIds.length,qualified_search_intents:keywords.length,market:campaign.market||null,google_geo_targets:targeting.geo_targets.length,google_language_targets:targeting.language_ids.length,geo_target_source:targeting.candidates||[],language_source:targeting.language_source,eu_political_advertising:euPoliticalDeclaration};
   const confidence=Math.min(.95,.55+(creativeIds.length>=2?.1:.05)+(keywords.length>=10?.1:.05)+.1+.1);
   const action={
     operation:'launch_campaign',
@@ -80,6 +82,7 @@ async function buildGoogleDraft(account,campaign){
       final_url:account.website,
       daily_budget:daily,
       bid_strategy:campaign.bid_strategy||'MAXIMIZE_CONVERSIONS',
+      contains_eu_political_advertising:euPoliticalDeclaration,
       network_settings:{targetGoogleSearch:true,targetSearchNetwork:true,targetContentNetwork:false,targetPartnerSearchNetwork:false},
       geo_targets:targeting.geo_targets,
       language_criterion_ids:targeting.language_ids,
