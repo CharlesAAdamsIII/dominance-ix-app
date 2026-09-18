@@ -4,6 +4,7 @@ const {Pool}=require('pg');
 const gateway=require('./execution-gateway-core');
 const google=require('./google-ads-write-adapter');
 const cp=require('./control-plane-core');
+const adCore=require('./ad-intelligence-core');
 
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const IS_PROD=process.env.NODE_ENV==='production'||!!process.env.RENDER;
@@ -58,7 +59,11 @@ async function fail(queue,error){
   const recommendation=(await pool.query('SELECT * FROM dominance_ad_recommendations WHERE id=$1',[queue.recommendation_id]).catch(()=>({rows:[]}))).rows[0];
   const account=(await pool.query('SELECT * FROM dominance_accounts WHERE id=$1',[queue.dominance_account_id]).catch(()=>({rows:[]}))).rows[0];
   await gateway.recordReceipt(pool,{queue,recommendation,account,status:r.rows[0]?.status||'failed',request:{action:queue.action},error:msg}).catch(()=>{});
-  if(r.rows[0]?.status==='failed')await pool.query(`UPDATE dominance_ad_recommendations SET status='execution_failed',updated_at=NOW(),actual_outcome=actual_outcome||$2::jsonb WHERE id=$1`,[queue.recommendation_id,JSON.stringify({execution_error:msg})]).catch(()=>{});
+  if(r.rows[0]?.status==='failed'){
+    await pool.query(`UPDATE dominance_ad_recommendations SET status='execution_failed',success=FALSE,evaluated_at=NOW(),updated_at=NOW(),actual_outcome=actual_outcome||$2::jsonb WHERE id=$1`,[queue.recommendation_id,JSON.stringify({execution_error:msg})]).catch(()=>{});
+    const pr=await pool.query('SELECT require_approval FROM dominance_ad_policy WHERE dominance_account_id=$1',[queue.dominance_account_id]).catch(()=>({rows:[]}));
+    if(pr.rows[0]?.require_approval===false)await adCore.suspendAutonomy(pool,queue.dominance_account_id,'Platform execution failed after maximum retries; approval mode restored.').catch(()=>{});
+  }
   console.error('[PLATFORM EXECUTION] queue='+queue.id+' error='+msg+' status='+(r.rows[0]?.status||'unknown'));
   return{ok:false,queue_id:queue.id,error:msg,status:r.rows[0]?.status||'failed'};
 }
@@ -73,10 +78,11 @@ async function runPlatformExecution(){
       try{results.push(await processOne(q))}catch(e){results.push(await fail(q,e))}
     }
     const accounts=await pool.query('SELECT id FROM dominance_accounts WHERE is_active=TRUE ORDER BY id');
-    for(const a of accounts.rows)await cp.recordWorkerAccountRun(pool,'platform-execution-worker',a.id,'completed',{processed:results.length,results},started).catch(()=>{});
+    const cycleStatus=results.some(x=>x.ok===false)?'partial_error':'completed';
+    for(const a of accounts.rows)await cp.recordWorkerAccountRun(pool,'platform-execution-worker',a.id,cycleStatus,{processed:results.length,results},started).catch(()=>{});
     await pool.query(`INSERT INTO dominance_worker_state(worker_key,last_heartbeat_at,last_run_at,status,details)
-      VALUES('platform-execution-worker',NOW(),NOW(),'online',$1::jsonb)
-      ON CONFLICT(worker_key) DO UPDATE SET last_heartbeat_at=NOW(),last_run_at=NOW(),status='online',details=EXCLUDED.details`,[JSON.stringify({processed:results.length,results})]).catch(()=>{});
+      VALUES('platform-execution-worker',NOW(),NOW(),$1,$2::jsonb)
+      ON CONFLICT(worker_key) DO UPDATE SET last_heartbeat_at=NOW(),last_run_at=NOW(),status=EXCLUDED.status,details=EXCLUDED.details`,[cycleStatus,JSON.stringify({processed:results.length,results})]).catch(()=>{});
     return{ok:true,processed:results.length,results};
   }catch(e){console.error('[PLATFORM EXECUTION]',e);return{ok:false,error:String(e.message||e)}}finally{busy=false}
 }
