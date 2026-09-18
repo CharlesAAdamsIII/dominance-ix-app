@@ -119,6 +119,7 @@ function validateBuildSpec(spec,{research_manifest=null,monthly_budget_max=0,spe
     if(!c.final_url)errors.push('Campaign final URL is required.');
     else{try{const u=new URL(c.final_url);if(!['http:','https:'].includes(u.protocol))errors.push('Campaign final URL must use HTTP or HTTPS.')}catch{errors.push('Campaign final URL is not a valid URL.');}}
     if(platform==='Google Ads'&&String(c.channel_type||'SEARCH').toUpperCase()!=='SEARCH')errors.push('The current Google Ads write adapter supports Search campaigns only.');
+    if(platform==='Google Ads'){const eu=String(c.contains_eu_political_advertising||'').toUpperCase();const allowed=new Set(['DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING','CONTAINS_EU_POLITICAL_ADVERTISING']);if(!allowed.has(eu))errors.push('Google Search campaign requires an explicit EU political advertising declaration.');}
     if(platform==='Google Ads'&&!(c.geo_targets||[]).length)errors.push('Google Search campaign requires at least one explicit resolved geographic target.');
     if(platform==='Google Ads'&&!(c.language_criterion_ids||[]).length)errors.push('Google Search campaign requires at least one explicit language target.');
     if(!Array.isArray(c.ad_groups)||!c.ad_groups.length)errors.push('At least one ad group is required.');
