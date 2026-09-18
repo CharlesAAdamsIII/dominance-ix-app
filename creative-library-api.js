@@ -60,10 +60,12 @@ async function promoteAsset(account,assetId){
  const campaignName=campaign?.rows?.[0]?.name||'Creative Intelligence Portfolio',ids=[];
  for(const v of variants){
   let validation={valid:true,errors:[],warnings:[],rules:platformBuild.PLATFORM_RULES[platformBuild.normalizePlatform(a.platform)]||null};
-  if(a.asset_category==='written_copy'&&(a.platform==='Google Ads'||a.platform==='Microsoft Ads')){
-    validation=platformBuild.validateCreativeForPlatform(a.platform,{headlines:v?.headlines||[],descriptions:v?.descriptions||[],final_urls:[account.website]});
-    if(!validation.valid)throw Error('Creative is research-backed but not platform-valid: '+validation.errors.join(' | '));
+  if(a.asset_category==='written_copy'){
+    validation=platformBuild.validateCreativeForPlatform(a.platform,{...(v||{}),final_urls:v?.final_urls||[account.website]});
+  }else if(a.asset_category==='images'||a.asset_category==='video'){
+    validation=platformBuild.validateGeneratedAssetForPlatform(a.platform,a.asset_category,a.metadata||{});
   }
+  if(!validation.valid)throw Error('Creative is research-backed but not platform-valid: '+validation.errors.join(' | '));
   const headline=Array.isArray(v?.headlines)?v.headlines[0]:(v?.headline||null);
   const body=v?.primary_text||v?.intro_text||(Array.isArray(v?.descriptions)?v.descriptions[0]:null)||v?.body_copy||(!a.binary_content?a.text_content:null);
   const cta=v?.cta||null,hook=v?.hook||null,angle=v?.message_angle||a.message_angle||null;
