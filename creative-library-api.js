@@ -54,7 +54,7 @@ async function promoteAsset(account,assetId){
  const a=r.rows[0];if(!a)throw Error('Creative asset not found.');
  const request={id:a.request_id,dominance_account_id:account.id,platform:a.platform,asset_category:a.asset_category,asset_format:a.asset_format,placement:a.placement,objective:a.objective,audience:a.audience,market:a.market,message_angle:a.message_angle,prompt:a.prompt,constraints:a.constraints};
  const manifest=platformBuild.creativeProvenanceManifest({account,request,asset:a,brief:a.brief||{}});
- if(!manifest.research_backed)throw Error('Creative cannot be approved for launch because no market, search, competitor, or measured performance evidence is attached to its production brief.');
+ if(!manifest.research_backed)throw Error('Creative cannot be approved for launch until its production brief contains market evidence, search-intent evidence, competitor evidence, and a platform-specific build contract.');
  const parsed=parseText(a.text_content),variants=Array.isArray(parsed?.variants)&&parsed.variants.length?parsed.variants:[null];
  const campaign=a.campaign_entity_id?await pool.query(`SELECT name FROM dominance_campaign_entities WHERE id=$1 AND dominance_account_id=$2`,[a.campaign_entity_id,account.id]).catch(()=>({rows:[]})):null;
  const campaignName=campaign?.rows?.[0]?.name||'Creative Intelligence Portfolio',ids=[];
