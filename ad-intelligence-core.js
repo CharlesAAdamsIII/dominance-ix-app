@@ -118,7 +118,7 @@ function withPolicyDefaults(settings){return{...DEFAULT_POLICY_SETTINGS,...(sett
 async function getOrCreatePolicy(pool,accountId){
   await ensureAdSchema(pool);
   await pool.query(`INSERT INTO dominance_ad_policy(dominance_account_id,settings) VALUES($1,$2::jsonb) ON CONFLICT DO NOTHING`,[accountId,JSON.stringify(DEFAULT_POLICY_SETTINGS)]);
-  await pool.query(`UPDATE dominance_ad_policy SET settings=$2::jsonb,updated_at=CASE WHEN settings ? 'google_ads_eu_political_advertising' THEN updated_at ELSE NOW() END WHERE dominance_account_id=$1 AND NOT (settings ? 'google_ads_eu_political_advertising')`,[accountId,JSON.stringify(withPolicyDefaults({}))]);
+  await pool.query(`UPDATE dominance_ad_policy SET settings=$2::jsonb||settings,updated_at=NOW() WHERE dominance_account_id=$1 AND NOT (settings ? 'google_ads_eu_political_advertising')`,[accountId,JSON.stringify(withPolicyDefaults({}))]);
   const r=await pool.query('SELECT * FROM dominance_ad_policy WHERE dominance_account_id=$1',[accountId]);
   if(r.rows[0])r.rows[0].settings=withPolicyDefaults(r.rows[0].settings);
   return r.rows[0];
