@@ -28,6 +28,7 @@ async function buildGoogleDraft(account,campaign){
   if(monthly<=0)return{status:'waiting_for_campaign_budget'};
   const daily=Math.floor(monthly/31*100)/100;
   if(daily<=0)return{status:'waiting_for_campaign_budget'};
+  const now=new Date(),daysInMonth=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+1,0)).getUTCDate(),daysRemaining=Math.max(1,daysInMonth-now.getUTCDate()+1),remainingMonthSpend=Math.min(monthly,Math.round(daily*daysRemaining*100)/100);
   const keywords=kw.rows.map(x=>({text:x.phrase,match_type:x.dominant_intent==='transactional'||x.dominant_intent==='local'?'EXACT':'PHRASE',negative:false,intent:x.dominant_intent,stage:x.journey_stage})).filter(x=>x.text).slice(0,20);
   const creativeIds=[...new Set(ads.map(x=>x.source_creative_id))];
   const evidenceCoverage={connected_google_ads:true,platform_valid_creatives:creativeIds.length,qualified_search_intents:keywords.length,market:campaign.market||null};
@@ -60,7 +61,7 @@ async function buildGoogleDraft(account,campaign){
     action,
     expected_outcome:{objective:campaign.objective||'qualified_outcomes',measurement:'downstream qualified outcome efficiency'},
     success_criteria:{must_remain_within_monthly_cap:true,platform_mutation_must_validate:true,tracking_and_readback_required:true,qualified_outcome_efficiency_must_not_regress:true},
-    funding_plan:{net_new_spend:monthly,monthly_cap_source:'dominance_ad_policy',campaign_monthly_allocation:monthly},
+    funding_plan:{net_new_spend:remainingMonthSpend,monthly_cap_source:'dominance_ad_policy',campaign_monthly_allocation:monthly,remaining_month_days:daysRemaining},
     confidence
   });
   await pool.query(`UPDATE dominance_campaign_entities SET settings=settings||$2::jsonb,updated_at=NOW() WHERE id=$1`,[campaign.id,JSON.stringify({launch_recommendation_id:recommendation.id,build_generated_at:new Date().toISOString(),evidence_coverage:evidenceCoverage})]);
