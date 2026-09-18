@@ -2,6 +2,8 @@ const {Pool}=require('pg');
 const {ensureSchema:ensureGeneratedSchema}=require('./creative-generation');
 const {runCreativeResearch}=require('./creative-research-worker');
 const {runCreativeProduction}=require('./creative-production-worker');
+const executionGateway=require('./execution-gateway-core');
+const platformBuild=require('./platform-build-core');
 
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const IS_PROD=process.env.NODE_ENV==='production'||!!process.env.RENDER;
@@ -47,21 +49,34 @@ async function libraryState(account){
 }
 
 async function promoteAsset(account,assetId){
- const r=await pool.query(`SELECT g.*,q.platform,q.asset_category,q.asset_format,q.placement,q.objective,q.audience,q.market,q.message_angle,q.campaign_entity_id,q.prompt,o.content brief FROM dominance_generated_assets g JOIN dominance_creative_requests q ON q.id=g.request_id LEFT JOIN LATERAL(SELECT content FROM dominance_creative_request_outputs WHERE request_id=q.id AND output_type='production_brief' ORDER BY id DESC LIMIT 1)o ON TRUE WHERE g.id=$1 AND g.dominance_account_id=$2 LIMIT 1`,[assetId,account.id]);
+ await executionGateway.ensureSchema(pool);
+ const r=await pool.query(`SELECT g.*,q.platform,q.asset_category,q.asset_format,q.placement,q.objective,q.audience,q.market,q.message_angle,q.campaign_entity_id,q.prompt,q.constraints,o.content brief FROM dominance_generated_assets g JOIN dominance_creative_requests q ON q.id=g.request_id LEFT JOIN LATERAL(SELECT content FROM dominance_creative_request_outputs WHERE request_id=q.id AND output_type='production_brief' ORDER BY id DESC LIMIT 1)o ON TRUE WHERE g.id=$1 AND g.dominance_account_id=$2 LIMIT 1`,[assetId,account.id]);
  const a=r.rows[0];if(!a)throw Error('Creative asset not found.');
+ const request={id:a.request_id,dominance_account_id:account.id,platform:a.platform,asset_category:a.asset_category,asset_format:a.asset_format,placement:a.placement,objective:a.objective,audience:a.audience,market:a.market,message_angle:a.message_angle,prompt:a.prompt,constraints:a.constraints};
+ const manifest=platformBuild.creativeProvenanceManifest({account,request,asset:a,brief:a.brief||{}});
+ if(!manifest.research_backed)throw Error('Creative cannot be approved for launch because no market, search, competitor, or measured performance evidence is attached to its production brief.');
  const parsed=parseText(a.text_content),variants=Array.isArray(parsed?.variants)&&parsed.variants.length?parsed.variants:[null];
  const campaign=a.campaign_entity_id?await pool.query(`SELECT name FROM dominance_campaign_entities WHERE id=$1 AND dominance_account_id=$2`,[a.campaign_entity_id,account.id]).catch(()=>({rows:[]})):null;
  const campaignName=campaign?.rows?.[0]?.name||'Creative Intelligence Portfolio',ids=[];
  for(const v of variants){
-  const headline=v?.headline||a.brief?.source_prompt||null,body=v?.body_copy||(!a.binary_content?a.text_content:null),cta=v?.cta||null,hook=v?.hook||null,angle=v?.message_angle||a.message_angle||null;
-  const visual=a.asset_category==='images'?`Generated image · ${a.asset_format}`:a.asset_category==='video'?`Generated video · ${a.asset_format}`:null,assetUrl=a.binary_content?`/api/creative-intelligence/assets/${a.id}/content`:null;
-  const ins=await pool.query(`INSERT INTO dominance_creatives(account_key,company_name,industry_key,platform,campaign_name,market,audience,message_angle,headline,body_copy,cta,creative_type,visual_style,hook,asset_url,status,source,approved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ready_to_launch','creative_intelligence',NOW()) RETURNING id`,[account.account_key,account.company_name,account.industry_key,a.platform,campaignName,a.market,a.audience,angle,headline,body,cta,a.asset_category,visual,hook,assetUrl]);
+  let validation={valid:true,errors:[],warnings:[],rules:platformBuild.PLATFORM_RULES[platformBuild.normalizePlatform(a.platform)]||null};
+  if(a.asset_category==='written_copy'&&(a.platform==='Google Ads'||a.platform==='Microsoft Ads')){
+    validation=platformBuild.validateCreativeForPlatform(a.platform,{headlines:v?.headlines||[],descriptions:v?.descriptions||[],final_urls:[account.website]});
+    if(!validation.valid)throw Error('Creative is research-backed but not platform-valid: '+validation.errors.join(' | '));
+  }
+  const headline=Array.isArray(v?.headlines)?v.headlines[0]:(v?.headline||null);
+  const body=v?.primary_text||v?.intro_text||(Array.isArray(v?.descriptions)?v.descriptions[0]:null)||v?.body_copy||(!a.binary_content?a.text_content:null);
+  const cta=v?.cta||null,hook=v?.hook||null,angle=v?.message_angle||a.message_angle||null;
+  const visual=a.asset_category==='images'?('Generated image · '+a.asset_format):a.asset_category==='video'?('Generated video · '+a.asset_format):null,assetUrl=a.binary_content?('/api/creative-intelligence/assets/'+a.id+'/content'):null;
+  const metadata={creative_payload:v||{},generated_asset_id:a.id,request_id:a.request_id,research_manifest_hash:manifest.manifest_hash,platform_validation:{valid:validation.valid,errors:validation.errors,warnings:validation.warnings},platform_requirements:a.brief?.platform_requirements||[]};
+  const ins=await pool.query(`INSERT INTO dominance_creatives(account_key,company_name,industry_key,platform,campaign_name,market,audience,message_angle,headline,body_copy,cta,creative_type,visual_style,hook,asset_url,status,source,approved_at,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ready_to_launch','creative_intelligence',NOW(),$16::jsonb) RETURNING id`,[account.account_key,account.company_name,account.industry_key,a.platform,campaignName,a.market,a.audience,angle,headline,body,cta,a.asset_category,visual,hook,assetUrl,JSON.stringify(metadata)]);
   ids.push(ins.rows[0].id);
+  await executionGateway.saveCreativeManifest(pool,{account,request,asset:a,brief:a.brief||{},creativeId:ins.rows[0].id});
  }
  await pool.query(`UPDATE dominance_generated_assets SET status='approved',updated_at=NOW() WHERE id=$1`,[a.id]);
  await pool.query(`UPDATE dominance_creative_requests SET status='approved',completed_at=COALESCE(completed_at,NOW()) WHERE id=$1`,[a.request_id]);
- await pool.query(`INSERT INTO dominance_activity(account_id,user_id,event_type,module,details) VALUES($1,NULL,'creative_asset_approved','creative_intelligence',$2::jsonb)`,[account.id,JSON.stringify({generated_asset_id:a.id,creative_ids:ids,campaign_name:campaignName,ready_to_launch:true})]).catch(()=>{});
- return{asset_id:a.id,creative_ids:ids,campaign_name:campaignName,status:'ready_to_launch'};
+ await pool.query(`INSERT INTO dominance_activity(account_id,user_id,event_type,module,details) VALUES($1,NULL,'creative_asset_approved','creative_intelligence',$2::jsonb)`,[account.id,JSON.stringify({generated_asset_id:a.id,creative_ids:ids,campaign_name:campaignName,ready_to_launch:true,research_manifest_hash:manifest.manifest_hash})]).catch(()=>{});
+ return{asset_id:a.id,creative_ids:ids,campaign_name:campaignName,status:'ready_to_launch',research_backed:true,research_manifest_hash:manifest.manifest_hash};
 }
 
 function startProductionSoon(){setImmediate(()=>runCreativeProduction().catch(e=>console.error('[CREATIVE LIBRARY] production trigger',e.message||e)))}
