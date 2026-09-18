@@ -81,17 +81,17 @@ function validateGeneratedAssetForPlatform(platform,category,metadata={}){
   if(!rules)return{valid:false,errors:['Unsupported platform: '+platform],warnings};
   if(category==='images'){
     const aspect=aspectFromSize(metadata.size);
-    if(!aspect)errors.push('Generated image dimensions '+(metadata.size||'unknown')+' do not map closely enough to an approved platform aspect ratio.');
-    else if(!(rules.image_aspects||[]).includes(aspect))errors.push(platform+' does not accept the generated '+aspect+' image for this DOMINANCE placement contract.');
+    if(!aspect)warnings.push('Generated image dimensions '+(metadata.size||'unknown')+' require placement-specific validation before physical publishing.');
+    else if(!(rules.image_aspects||[]).includes(aspect))warnings.push(platform+' generated '+aspect+' image needs a platform-specific crop/derivative before physical publishing.');
   }
   if(category==='video'){
     const aspect=aspectFromSize(metadata.size),seconds=Number(metadata.seconds||0);
-    if(aspect&&!(rules.video?.aspects||[]).includes(aspect))errors.push(platform+' video aspect '+aspect+' is outside the approved platform contract.');
-    if(seconds&&(rules.video?.durations||[]).length&&!rules.video.durations.includes(seconds))errors.push(platform+' generated video duration '+seconds+'s does not match an approved DOMINANCE platform duration.');
+    if(aspect&&!(rules.video?.aspects||[]).includes(aspect))warnings.push(platform+' video aspect '+aspect+' needs a platform-specific derivative before physical publishing.');
+    if(seconds&&(rules.video?.durations||[]).length&&!rules.video.durations.includes(seconds))warnings.push(platform+' generated video duration '+seconds+'s needs a platform-specific cut before physical publishing.');
     if(!metadata.size)warnings.push('Video dimensions are not yet available for deterministic validation.');
     if(!metadata.seconds)warnings.push('Video duration is not yet available for deterministic validation.');
   }
-  return{valid:errors.length===0,errors,warnings,detected_aspect:aspectFromSize(metadata.size)};
+  return{valid:errors.length===0,errors,warnings,detected_aspect:aspectFromSize(metadata.size),hard_publish_validation:false};
 }
 
 function buildSpecFromRecommendation(recommendation,account){
