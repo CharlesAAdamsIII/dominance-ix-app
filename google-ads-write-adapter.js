@@ -75,32 +75,30 @@ function rsaCreate(adGroupResource,ad,status){
 }
 
 function launchOperations(spec,customerId){
-  const c=spec.campaign||{},ops=[],budgetResource=tempName(customerId,'campaignBudgets',-1),campaignResource=tempName(customerId,'campaigns',-2);
-  ops.push({campaignBudgetOperation:{create:{resourceName:budgetResource,name:c.name+' · DOMINANCE Budget',deliveryMethod:'STANDARD',amountMicros:micros(c.daily_budget),explicitlyShared:false}}});
+  const c=spec.campaign||{},budgetOps=[],campaignOps=[],adGroupOps=[],criterionOps=[],adOps=[],campaignCriterionOps=[];
+  const budgetResource=tempName(customerId,'campaignBudgets',-1),campaignResource=tempName(customerId,'campaigns',-2);
+  budgetOps.push({campaignBudgetOperation:{create:{resourceName:budgetResource,name:c.name+' · DOMINANCE Budget',deliveryMethod:'STANDARD',amountMicros:micros(c.daily_budget),explicitlyShared:false}}});
   const campaign={resourceName:campaignResource,name:c.name,status:c.status||'PAUSED',advertisingChannelType:c.channel_type||'SEARCH',campaignBudget:budgetResource,networkSettings:c.network_settings||{targetGoogleSearch:true,targetSearchNetwork:true,targetContentNetwork:false,targetPartnerSearchNetwork:false},...bidFields(c.bid_strategy)};
   if(c.contains_eu_political_advertising)campaign.containsEuPoliticalAdvertising=c.contains_eu_political_advertising;
-  ops.push({campaignOperation:{create:campaign}});
+  campaignOps.push({campaignOperation:{create:campaign}});
   let temp=-3;
   for(const g of c.ad_groups||[]){
     const adGroupResource=tempName(customerId,'adGroups',temp--);
     const adGroup={resourceName:adGroupResource,campaign:campaignResource,name:g.name,status:'ENABLED',type:'SEARCH_STANDARD'};
     if(Number(g.cpc_bid)>0)adGroup.cpcBidMicros=micros(g.cpc_bid);
-    ops.push({adGroupOperation:{create:adGroup}});
+    adGroupOps.push({adGroupOperation:{create:adGroup}});
     for(const k of g.keywords||[]){
       if(!k.text)continue;
-      const criterion={resourceName:tempName(customerId,'adGroupCriteria',temp--),adGroup:adGroupResource,status:'ENABLED',negative:k.negative===true,keyword:{text:k.text,matchType:k.match_type||'PHRASE'}};
-      ops.push({adGroupCriterionOperation:{create:criterion}});
+      criterionOps.push({adGroupCriterionOperation:{create:{adGroup:adGroupResource,status:'ENABLED',negative:k.negative===true,keyword:{text:k.text,matchType:k.match_type||'PHRASE'}}}});
     }
-    for(const ad of g.ads||[]){
-      ops.push({adGroupAdOperation:{create:{resourceName:tempName(customerId,'adGroupAds',temp--),...rsaCreate(adGroupResource,ad,c.status||'PAUSED')}}});
-    }
+    for(const ad of g.ads||[])adOps.push({adGroupAdOperation:{create:rsaCreate(adGroupResource,ad,c.status||'PAUSED')}});
   }
   for(const geo of c.geo_targets||[]){
     const criterionId=String(geo.criterion_id||geo.id||'').replace(/\D/g,'');
     if(!criterionId)throw Error('Google Ads geo target is missing a numeric geo target criterion ID.');
-    ops.push({campaignCriterionOperation:{create:{resourceName:tempName(customerId,'campaignCriteria',temp--),campaign:campaignResource,negative:geo.negative===true,location:{geoTargetConstant:'geoTargetConstants/'+criterionId}}}});
+    campaignCriterionOps.push({campaignCriterionOperation:{create:{campaign:campaignResource,negative:geo.negative===true,location:{geoTargetConstant:'geoTargetConstants/'+criterionId}}}});
   }
-  return ops;
+  return[...budgetOps,...campaignOps,...adGroupOps,...criterionOps,...campaignCriterionOps,...adOps];
 }
 
 async function validateAndMutate(token,customerId,operations){
