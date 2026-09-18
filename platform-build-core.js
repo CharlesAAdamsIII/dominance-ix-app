@@ -106,7 +106,7 @@ function buildSpecFromRecommendation(recommendation,account){
   return base;
 }
 
-function validateBuildSpec(spec,{research_manifest=null,monthly_budget_max=0,spend_to_date=0}={}){
+function validateBuildSpec(spec,{research_manifest=null,monthly_budget_max=0,spend_to_date=0,committed_monthly_budget=0}={}){
   const errors=[],warnings=[],platform=normalizePlatform(spec?.platform||''),rules=PLATFORM_RULES[platform];
   if(!rules)errors.push('No platform specification exists for '+(platform||'unknown platform')+'.');
   if(research_manifest&&!research_manifest.research_backed)errors.push('Research provenance is missing or contains no supporting market/search/competitor/performance evidence.');
@@ -122,7 +122,7 @@ function validateBuildSpec(spec,{research_manifest=null,monthly_budget_max=0,spe
       if(!g.ads?.length)errors.push('Ad group '+(i+1)+' has no ads.');
       for(const [j,ad] of (g.ads||[]).entries()){const r=validateCreativeForPlatform(platform,ad);for(const e of r.errors)errors.push('Ad group '+(i+1)+', ad '+(j+1)+': '+e);}
     }
-    if(monthly_budget_max>0&&spend_to_date+n(c.daily_budget)*31>monthly_budget_max)errors.push('Campaign launch would exceed the account monthly advertising maximum at a 31-day conservative projection.');
+    if(monthly_budget_max>0){const planned=committed_monthly_budget+n(c.daily_budget)*31,exposure=Math.max(spend_to_date,planned);if(exposure>monthly_budget_max)errors.push('Campaign launch would exceed the account monthly advertising maximum after existing campaign allocations are included.');}
   }else if(spec?.operation==='reallocate_budget'){
     if(!spec.from_entity_id||!spec.to_entity_id)errors.push('Budget reallocation requires source and destination campaign entities.');
     if(n(spec.amount)<=0)errors.push('Budget reallocation amount must be greater than zero.');
