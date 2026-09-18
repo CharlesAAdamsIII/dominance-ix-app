@@ -29,12 +29,14 @@ function normalizePlatform(v){
 function evidenceSummary(brief={}){
   const intel=brief.intelligence||{},market=intel.market_signals||[],search=intel.search_intent||[],competitors=intel.competitor_context||[],competitorEvents=intel.competitor_events||[],learning=intel.winning_patterns||[];
   const sourceList=brief.intelligence?.audience_market_context?.data_quality?.sources_available||[];
-  return{supported:market.length+search.length+competitors.length+competitorEvents.length+learning.length>0,sources:[...new Set(sourceList.map(clean).filter(Boolean))],market_signals:market.slice(0,20),search_intent:search.slice(0,30),competitor_context:competitors.slice(0,20),competitor_events:competitorEvents.slice(0,20),measured_learning:learning.slice(0,20)};
+  const sources=[...new Set(sourceList.map(clean).filter(Boolean))],has_market=market.length>0,has_search=search.length>0,has_competitor=competitors.length+competitorEvents.length>0;
+  return{supported:has_market&&has_search&&has_competitor,has_market,has_search,has_competitor,sources,market_signals:market.slice(0,20),search_intent:search.slice(0,30),competitor_context:competitors.slice(0,20),competitor_events:competitorEvents.slice(0,20),measured_learning:learning.slice(0,20)};
 }
 
 function creativeProvenanceManifest({account,request,asset,brief}={}){
   const evidence=evidenceSummary(brief||{});
-  const manifest={version:'1.0.0',account_id:account?.id||request?.dominance_account_id||null,account_key:account?.account_key||null,creative_request_id:request?.id||asset?.request_id||null,generated_asset_id:asset?.id||null,platform:normalizePlatform(request?.platform||brief?.destination?.platform||''),generated_at:asset?.created_at||brief?.generated_at||new Date().toISOString(),research_backed:evidence.supported,evidence,assignment:brief?.assignment||{},strategic_direction:brief?.strategic_direction||{},source_prompt:brief?.source_prompt||request?.prompt||null,platform_requirements:brief?.platform_requirements||[],constraints:brief?.constraints||request?.constraints||{}};
+  const platformRequirements=brief?.platform_requirements||[];
+  const manifest={version:'1.0.0',account_id:account?.id||request?.dominance_account_id||null,account_key:account?.account_key||null,creative_request_id:request?.id||asset?.request_id||null,generated_asset_id:asset?.id||null,platform:normalizePlatform(request?.platform||brief?.destination?.platform||''),generated_at:asset?.created_at||brief?.generated_at||new Date().toISOString(),research_backed:evidence.supported&&platformRequirements.length>0,market_research_backed:evidence.has_market,search_research_backed:evidence.has_search,competitor_research_backed:evidence.has_competitor,platform_contract_backed:platformRequirements.length>0,evidence,assignment:brief?.assignment||{},strategic_direction:brief?.strategic_direction||{},source_prompt:brief?.source_prompt||request?.prompt||null,platform_requirements:platformRequirements,constraints:brief?.constraints||request?.constraints||{}};
   return{...manifest,manifest_hash:hashObject(manifest)};
 }
 
