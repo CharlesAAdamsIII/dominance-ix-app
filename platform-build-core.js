@@ -129,6 +129,7 @@ function validateBuildSpec(spec,{research_manifest=null,monthly_budget_max=0,spe
   }else if(spec?.operation==='update_campaign_budget'){
     if(!spec.campaign_entity_id)errors.push('Campaign entity is required for budget update.');
     if(n(spec.daily_budget)<=0)errors.push('Daily budget must be greater than zero.');
+    if(monthly_budget_max>0){const planned=committed_monthly_budget+n(spec.daily_budget)*31,exposure=Math.max(spend_to_date,planned);if(exposure>monthly_budget_max)errors.push('Campaign budget update would exceed the account monthly advertising maximum after existing campaign allocations are included.');}
   }else errors.push('Execution operation '+(spec?.operation||'unknown')+' is not supported by the execution gateway.');
   if(rules&&!rules.supports_write)warnings.push(platform+' build validation is available, but the physical write adapter is not connected yet.');
   return{ready:errors.length===0,platform,connector:rules?.connector||null,write_adapter_available:!!rules?.supports_write,errors,warnings};
