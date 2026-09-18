@@ -14,6 +14,7 @@ async function main(){
       asset_url TEXT, status TEXT NOT NULL DEFAULT 'draft', source TEXT NOT NULL DEFAULT 'dominance',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), approved_at TIMESTAMPTZ
     )`);
+    await pool.query(`ALTER TABLE dominance_creatives ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`);
     await pool.query(`CREATE TABLE IF NOT EXISTS dominance_creative_performance (
       id BIGSERIAL PRIMARY KEY, creative_id BIGINT NOT NULL REFERENCES dominance_creatives(id) ON DELETE CASCADE,
       observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), impressions BIGINT NOT NULL DEFAULT 0,

@@ -9,7 +9,7 @@ services:
     name: dominance-market-radar
     runtime: node
     plan: starter
-    buildCommand: npm install
+    buildCommand: npm install && npm run test:control && npm run test:execution
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
@@ -44,6 +44,10 @@ services:
         sync: false
       - key: GOOGLE_ADS_LOGIN_CUSTOMER_ID
         sync: false
+      - key: GOOGLE_ADS_DEVELOPER_TOKEN
+        sync: false
+      - key: GOOGLE_ADS_API_VERSION
+        value: v25
       - key: GOOGLE_MAPS_BROWSER_API_KEY
         sync: false
       - key: GOOGLE_MAPS_MAP_ID
@@ -65,7 +69,7 @@ services:
     name: dominance-intelligence-worker
     runtime: node
     plan: starter
-    buildCommand: npm install
+    buildCommand: npm install && npm run test:control && npm run test:execution
     startCommand: node worker-suite.js
     autoDeploy: true
     envVars:
@@ -99,6 +103,10 @@ services:
         value: 1
       - key: CREATIVE_QUEUE_INTERVAL_MINUTES
         value: 1
+      - key: CAMPAIGN_BUILD_INTERVAL_MINUTES
+        value: 15
+      - key: PLATFORM_EXECUTION_INTERVAL_MINUTES
+        value: 1
       - key: PUBLIC_INTELLIGENCE_INTERVAL_HOURS
         value: 24
       - key: OPENAI_TEXT_MODEL
@@ -117,6 +125,10 @@ services:
         sync: false
       - key: GOOGLE_ADS_LOGIN_CUSTOMER_ID
         sync: false
+      - key: GOOGLE_ADS_DEVELOPER_TOKEN
+        sync: false
+      - key: GOOGLE_ADS_API_VERSION
+        value: v25
       - key: CREDENTIAL_ENCRYPTION_KEY
         sync: false
       - key: DATAFORSEO_LOGIN

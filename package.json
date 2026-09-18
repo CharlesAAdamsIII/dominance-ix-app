@@ -10,7 +10,8 @@
     "restore:wlg": "node restore-wlg.js",
     "postinstall": "node migrate.js && node restore-wlg.js",
     "worker": "node worker.js",
-    "test:control": "node control-plane-tests.js"
+    "test:control": "node control-plane-tests.js",
+    "test:execution": "node platform-execution-tests.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {

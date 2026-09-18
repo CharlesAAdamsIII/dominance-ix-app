@@ -112,10 +112,15 @@ async function ensureAdSchema(pool){
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_dom_ad_exec_queue ON dominance_ad_execution_queue(status,created_at)`);
 }
 
+const DEFAULT_POLICY_SETTINGS={google_ads_eu_political_advertising:'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING'};
+function withPolicyDefaults(settings){return{...DEFAULT_POLICY_SETTINGS,...(settings||{})}}
+
 async function getOrCreatePolicy(pool,accountId){
   await ensureAdSchema(pool);
-  await pool.query(`INSERT INTO dominance_ad_policy(dominance_account_id) VALUES($1) ON CONFLICT DO NOTHING`,[accountId]);
+  await pool.query(`INSERT INTO dominance_ad_policy(dominance_account_id,settings) VALUES($1,$2::jsonb) ON CONFLICT DO NOTHING`,[accountId,JSON.stringify(DEFAULT_POLICY_SETTINGS)]);
+  await pool.query(`UPDATE dominance_ad_policy SET settings=$2::jsonb||settings,updated_at=NOW() WHERE dominance_account_id=$1 AND NOT (settings ? 'google_ads_eu_political_advertising')`,[accountId,JSON.stringify(withPolicyDefaults({}))]);
   const r=await pool.query('SELECT * FROM dominance_ad_policy WHERE dominance_account_id=$1',[accountId]);
+  if(r.rows[0])r.rows[0].settings=withPolicyDefaults(r.rows[0].settings);
   return r.rows[0];
 }
 
@@ -124,7 +129,7 @@ async function updatePolicy(pool,accountId,input={}){
   const max=input.monthly_budget_max===undefined?Number(current.monthly_budget_max):money(input.monthly_budget_max);
   const currency=String(input.currency||current.currency||'USD').slice(0,8).toUpperCase();
   const target=String(input.target_outcome||current.target_outcome||'qualified_outcomes').slice(0,80);
-  const settings={...(current.settings||{}),...(input.settings||{})};
+  const settings=withPolicyDefaults({...(current.settings||{}),...(input.settings||{})});
   const r=await pool.query(`UPDATE dominance_ad_policy SET monthly_budget_max=$1,currency=$2,target_outcome=$3,settings=$4::jsonb,updated_at=NOW() WHERE dominance_account_id=$5 RETURNING *`,[max,currency,target,JSON.stringify(settings),accountId]);
   return r.rows[0];
 }
