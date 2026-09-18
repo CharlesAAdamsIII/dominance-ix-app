@@ -40,7 +40,7 @@ async function buildGoogleDraft(account,campaign){
     evidence_coverage:evidenceCoverage,
     campaign:{
       name:campaign.name,
-      status:'PAUSED',
+      status:'ENABLED',
       channel_type:'SEARCH',
       objective:campaign.objective||'qualified_outcomes',
       final_url:account.website,
@@ -56,7 +56,7 @@ async function buildGoogleDraft(account,campaign){
     source_platform:'Google Ads',
     recommendation_type:'campaign_launch',
     title:'Build and publish Google Search campaign: '+campaign.name,
-    rationale:'DOMINANCE assembled this campaign from the approved monthly budget, connected Google Ads account, active search-intent intelligence, and research-backed Google Ads creatives. Approval authorizes the Control Plane to validate and publish this exact build while remaining inside the account hard cap.',
+    rationale:'DOMINANCE assembled this campaign from the approved monthly budget, connected Google Ads account, active search-intent intelligence, and research-backed Google Ads creatives. Approval authorizes the Control Plane to validate and publish this exact build live while remaining inside the account hard cap.',
     action,
     expected_outcome:{objective:campaign.objective||'qualified_outcomes',measurement:'downstream qualified outcome efficiency'},
     success_criteria:{must_remain_within_monthly_cap:true,platform_mutation_must_validate:true,tracking_and_readback_required:true,qualified_outcome_efficiency_must_not_regress:true},
