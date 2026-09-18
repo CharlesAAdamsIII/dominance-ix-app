@@ -42,17 +42,56 @@ function validateCreativeForPlatform(platform,creative={}){
   platform=normalizePlatform(platform);
   const rules=PLATFORM_RULES[platform],errors=[],warnings=[];
   if(!rules)return{valid:false,errors:['Unsupported platform: '+(platform||'unknown')],warnings,rules:null};
-  if(platform==='Google Ads'){
-    const headlines=(creative.headlines||[]).map(clean).filter(Boolean),descriptions=(creative.descriptions||[]).map(clean).filter(Boolean);
-    if(headlines.length<rules.written_copy.min_headlines)errors.push('Google responsive search ads require at least '+rules.written_copy.min_headlines+' headlines.');
-    if(headlines.length>rules.written_copy.max_headlines)errors.push('Google responsive search ads allow at most '+rules.written_copy.max_headlines+' headlines.');
+  const headlines=(creative.headlines||[]).map(clean).filter(Boolean),descriptions=(creative.descriptions||[]).map(clean).filter(Boolean);
+  if(platform==='Google Ads'||platform==='Microsoft Ads'){
+    if(headlines.length<rules.written_copy.min_headlines)errors.push(platform+' responsive search ads require at least '+rules.written_copy.min_headlines+' headlines.');
+    if(headlines.length>rules.written_copy.max_headlines)errors.push(platform+' responsive search ads allow at most '+rules.written_copy.max_headlines+' headlines.');
     headlines.forEach((x,i)=>{if(x.length>rules.written_copy.max_headline_chars)errors.push('Headline '+(i+1)+' exceeds '+rules.written_copy.max_headline_chars+' characters.')});
-    if(descriptions.length<rules.written_copy.min_descriptions)errors.push('Google responsive search ads require at least '+rules.written_copy.min_descriptions+' descriptions.');
-    if(descriptions.length>rules.written_copy.max_descriptions)errors.push('Google responsive search ads allow at most '+rules.written_copy.max_descriptions+' descriptions.');
+    if(descriptions.length<rules.written_copy.min_descriptions)errors.push(platform+' responsive search ads require at least '+rules.written_copy.min_descriptions+' descriptions.');
+    if(descriptions.length>rules.written_copy.max_descriptions)errors.push(platform+' responsive search ads allow at most '+rules.written_copy.max_descriptions+' descriptions.');
     descriptions.forEach((x,i)=>{if(x.length>rules.written_copy.max_description_chars)errors.push('Description '+(i+1)+' exceeds '+rules.written_copy.max_description_chars+' characters.')});
-    if(!(creative.final_urls||[]).filter(Boolean).length)errors.push('Google responsive search ad requires at least one final URL.');
+    if(!(creative.final_urls||[]).filter(Boolean).length)errors.push(platform+' responsive search ad requires at least one final URL.');
+  }else if(platform==='Meta'){
+    if(clean(creative.primary_text).length>rules.written_copy.max_primary_text_chars)errors.push('Meta primary text exceeds '+rules.written_copy.max_primary_text_chars+' characters.');
+    if(clean(creative.headline).length>rules.written_copy.max_headline_chars)errors.push('Meta headline exceeds '+rules.written_copy.max_headline_chars+' characters.');
+    if(clean(creative.description).length>rules.written_copy.max_description_chars)errors.push('Meta description exceeds '+rules.written_copy.max_description_chars+' characters.');
+    if(!clean(creative.primary_text)||!clean(creative.headline))errors.push('Meta creative requires primary text and headline.');
+  }else if(platform==='LinkedIn'){
+    if(clean(creative.intro_text).length>rules.written_copy.max_intro_chars)errors.push('LinkedIn intro text exceeds '+rules.written_copy.max_intro_chars+' characters.');
+    if(clean(creative.headline).length>rules.written_copy.max_headline_chars)errors.push('LinkedIn headline exceeds '+rules.written_copy.max_headline_chars+' characters.');
+    if(clean(creative.description).length>rules.written_copy.max_description_chars)errors.push('LinkedIn description exceeds '+rules.written_copy.max_description_chars+' characters.');
+    if(!clean(creative.intro_text)||!clean(creative.headline))errors.push('LinkedIn creative requires intro text and headline.');
+  }else if(platform==='TikTok'){
+    if(clean(creative.caption).length>rules.written_copy.max_caption_chars)errors.push('TikTok caption exceeds '+rules.written_copy.max_caption_chars+' characters.');
+    if(!clean(creative.caption))errors.push('TikTok creative requires a caption.');
   }
   return{valid:errors.length===0,errors,warnings,rules};
+}
+
+function aspectFromSize(size){
+  const m=String(size||'').match(/^(\d+)x(\d+)$/);if(!m)return null;
+  const ratio=Number(m[1])/Number(m[2]);
+  const known=[['1:1',1],['4:5',0.8],['9:16',0.5625],['16:9',1.7778],['1.91:1',1.91]];
+  known.sort((a,b)=>Math.abs(ratio-a[1])-Math.abs(ratio-b[1]));
+  return Math.abs(ratio-known[0][1])<=0.08?known[0][0]:null;
+}
+function validateGeneratedAssetForPlatform(platform,category,metadata={}){
+  platform=normalizePlatform(platform);
+  const rules=PLATFORM_RULES[platform],errors=[],warnings=[];
+  if(!rules)return{valid:false,errors:['Unsupported platform: '+platform],warnings};
+  if(category==='images'){
+    const aspect=aspectFromSize(metadata.size);
+    if(!aspect)errors.push('Generated image dimensions '+(metadata.size||'unknown')+' do not map closely enough to an approved platform aspect ratio.');
+    else if(!(rules.image_aspects||[]).includes(aspect))errors.push(platform+' does not accept the generated '+aspect+' image for this DOMINANCE placement contract.');
+  }
+  if(category==='video'){
+    const aspect=aspectFromSize(metadata.size),seconds=Number(metadata.seconds||0);
+    if(aspect&&!(rules.video?.aspects||[]).includes(aspect))errors.push(platform+' video aspect '+aspect+' is outside the approved platform contract.');
+    if(seconds&&(rules.video?.durations||[]).length&&!rules.video.durations.includes(seconds))errors.push(platform+' generated video duration '+seconds+'s does not match an approved DOMINANCE platform duration.');
+    if(!metadata.size)warnings.push('Video dimensions are not yet available for deterministic validation.');
+    if(!metadata.seconds)warnings.push('Video duration is not yet available for deterministic validation.');
+  }
+  return{valid:errors.length===0,errors,warnings,detected_aspect:aspectFromSize(metadata.size)};
 }
 
 function buildSpecFromRecommendation(recommendation,account){
@@ -95,4 +134,4 @@ function validateBuildSpec(spec,{research_manifest=null,monthly_budget_max=0,spe
   return{ready:errors.length===0,platform,connector:rules?.connector||null,write_adapter_available:!!rules?.supports_write,errors,warnings};
 }
 
-module.exports={PLATFORM_RULES,normalizePlatform,evidenceSummary,creativeProvenanceManifest,validateCreativeForPlatform,buildSpecFromRecommendation,validateBuildSpec,hashObject};
+module.exports={PLATFORM_RULES,normalizePlatform,evidenceSummary,creativeProvenanceManifest,validateCreativeForPlatform,validateGeneratedAssetForPlatform,buildSpecFromRecommendation,validateBuildSpec,hashObject};
