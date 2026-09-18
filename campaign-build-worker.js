@@ -3,6 +3,7 @@
 const {Pool}=require('pg');
 const adCore=require('./ad-intelligence-core');
 const cp=require('./control-plane-core');
+const googleAds=require('./google-ads-write-adapter');
 
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const IS_PROD=process.env.NODE_ENV==='production'||!!process.env.RENDER;
@@ -10,11 +11,43 @@ const INTERVAL_MS=Math.max(5,Number(process.env.CAMPAIGN_BUILD_INTERVAL_MINUTES|
 const pool=DATABASE_URL?new Pool({connectionString:DATABASE_URL,ssl:IS_PROD?{rejectUnauthorized:false}:false}):null;
 let timer=null,busy=false;
 
+async function googleTargeting(account,campaign){
+  const targeting=campaign.targeting||{};
+  let candidates=[];
+  if(Array.isArray(targeting.google_geo_targets)&&targeting.google_geo_targets.length)candidates=targeting.google_geo_targets;
+  else if(Array.isArray(targeting.google_location_names)&&targeting.google_location_names.length)candidates=targeting.google_location_names.map(name=>({name,source:'campaign_targeting'}));
+  else{
+    const generic=new Set(['priority markets','priority market','national','regional','selected markets','market radar','automatic','auto']);
+    const market=String(campaign.market||'').trim();
+    if(market&&!generic.has(market.toLowerCase()))candidates=[{name:market,geography_type:'market',source:'campaign_market'}];
+    else{
+      const t=await pool.query(`SELECT name,geography_type,latitude,longitude,radius_miles,source,priority,metadata FROM dominance_target_areas WHERE account_id=$1 AND enabled=TRUE ORDER BY priority DESC,updated_at DESC LIMIT 6`,[account.id]).catch(()=>({rows:[]}));
+      candidates=t.rows.map(x=>({name:x.name,geography_type:x.geography_type,latitude:x.latitude,longitude:x.longitude,radius_miles:x.radius_miles,source:x.source||'market_radar',country_code:x.metadata?.country_code||null,priority:Number(x.priority||0)}));
+    }
+  }
+  if(!candidates.length)return{status:'waiting_for_market_targeting',geo_targets:[],language_ids:[]};
+  const countryCode=String(targeting.google_country_code||'').trim().toUpperCase()||null;
+  const geoTargets=await googleAds.resolveGeoTargets(pool,account.id,candidates,{countryCode,locale:String(targeting.google_locale||'en')});
+  const unresolved=geoTargets.filter(x=>x.type==='unresolved');
+  const usable=geoTargets.filter(x=>x.type==='location'||x.type==='proximity');
+  if(!usable.length||unresolved.length)return{status:'waiting_for_google_geo_resolution',geo_targets:usable,unresolved:unresolved.map(x=>x.name),language_ids:[]};
+  let languageIds=(targeting.google_language_criterion_ids||[]).map(x=>String(x).replace(/\D/g,'')).filter(Boolean);
+  let languageSource='campaign_targeting';
+  if(!languageIds.length){
+    const countries=[...new Set(usable.map(x=>String(x.country_code||countryCode||'').toUpperCase()).filter(Boolean))];
+    if(!countries.length||countries.every(x=>x==='US')){languageIds=['1000'];languageSource='default_english_for_us_or_unspecified_country'}
+    else return{status:'waiting_for_google_language_targeting',geo_targets:usable,language_ids:[]};
+  }
+  return{status:'ready',geo_targets:usable,language_ids:languageIds,language_source:languageSource,candidates:candidates.map(x=>x.name||x.criterion_id||'proximity')};
+}
+
 async function buildGoogleDraft(account,campaign){
   const dup=await pool.query(`SELECT 1 FROM dominance_ad_recommendations WHERE dominance_account_id=$1 AND recommendation_type='campaign_launch' AND action->>'campaign_entity_id'=$2 AND status IN('pending_approval','approved','executing','monitoring','completed') LIMIT 1`,[account.id,String(campaign.id)]);
   if(dup.rowCount)return{status:'already_recommended'};
   const conn=await pool.query(`SELECT 1 FROM dominance_connections WHERE account_id=$1 AND provider_key='GADS' AND status IN('connected','enabled') AND credential_ciphertext IS NOT NULL AND metadata->>'selected_resource' IS NOT NULL LIMIT 1`,[account.id]);
   if(!conn.rowCount)return{status:'waiting_for_google_ads_connection'};
+  const targeting=await googleTargeting(account,campaign);
+  if(targeting.status!=='ready')return targeting;
   const kw=await pool.query(`SELECT phrase,dominant_intent,journey_stage,commerciality_score,priority FROM dominance_keyword_intelligence WHERE account_id=$1 AND active=TRUE ORDER BY commerciality_score DESC,priority DESC LIMIT 25`,[account.id]).catch(()=>({rows:[]}));
   const cr=await pool.query(`SELECT id,headline,body_copy,cta,metadata FROM dominance_creatives WHERE account_key=$1 AND platform='Google Ads' AND status='ready_to_launch' AND COALESCE((metadata->'platform_validation'->>'valid')::boolean,FALSE)=TRUE ORDER BY approved_at DESC NULLS LAST,created_at DESC LIMIT 6`,[account.account_key]).catch(()=>({rows:[]}));
   if(!kw.rows.length||!cr.rows.length)return{status:'waiting_for_research_or_platform_valid_creatives',keywords:kw.rowCount||0,creatives:cr.rowCount||0};
@@ -31,7 +64,7 @@ async function buildGoogleDraft(account,campaign){
   const now=new Date(),daysInMonth=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+1,0)).getUTCDate(),daysRemaining=Math.max(1,daysInMonth-now.getUTCDate()+1),remainingMonthSpend=Math.min(monthly,Math.round(daily*daysRemaining*100)/100);
   const keywords=kw.rows.map(x=>({text:x.phrase,match_type:x.dominant_intent==='transactional'||x.dominant_intent==='local'?'EXACT':'PHRASE',negative:false,intent:x.dominant_intent,stage:x.journey_stage})).filter(x=>x.text).slice(0,20);
   const creativeIds=[...new Set(ads.map(x=>x.source_creative_id))];
-  const evidenceCoverage={connected_google_ads:true,platform_valid_creatives:creativeIds.length,qualified_search_intents:keywords.length,market:campaign.market||null};
+  const evidenceCoverage={connected_google_ads:true,platform_valid_creatives:creativeIds.length,qualified_search_intents:keywords.length,market:campaign.market||null,google_geo_targets:targeting.geo_targets.length,google_language_targets:targeting.language_ids.length,geo_target_source:targeting.candidates||[],language_source:targeting.language_source};
   const confidence=Math.min(.95,.55+(creativeIds.length>=2?.1:.05)+(keywords.length>=10?.1:.05)+.1+.1);
   const action={
     operation:'launch_campaign',
@@ -48,7 +81,8 @@ async function buildGoogleDraft(account,campaign){
       daily_budget:daily,
       bid_strategy:campaign.bid_strategy||'MAXIMIZE_CONVERSIONS',
       network_settings:{targetGoogleSearch:true,targetSearchNetwork:true,targetContentNetwork:false,targetPartnerSearchNetwork:false},
-      geo_targets:Array.isArray(campaign.targeting?.google_geo_targets)?campaign.targeting.google_geo_targets:[],
+      geo_targets:targeting.geo_targets,
+      language_criterion_ids:targeting.language_ids,
       ad_groups:[{name:(campaign.name+' · High Intent').slice(0,120),keywords,ads:ads.slice(0,3)}]
     }
   };
@@ -65,7 +99,7 @@ async function buildGoogleDraft(account,campaign){
     confidence
   });
   await pool.query(`UPDATE dominance_campaign_entities SET settings=settings||$2::jsonb,updated_at=NOW() WHERE id=$1`,[campaign.id,JSON.stringify({launch_recommendation_id:recommendation.id,build_generated_at:new Date().toISOString(),evidence_coverage:evidenceCoverage})]);
-  return{status:'recommended',recommendation_id:recommendation.id,creative_ids:creativeIds,keywords:keywords.length,daily_budget:daily};
+  return{status:'recommended',recommendation_id:recommendation.id,creative_ids:creativeIds,keywords:keywords.length,daily_budget:daily,geo_targets:targeting.geo_targets.length,language_targets:targeting.language_ids.length};
 }
 
 async function processAccount(account){
