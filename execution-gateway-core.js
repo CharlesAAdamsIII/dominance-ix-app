@@ -3,6 +3,7 @@
 const build=require('./platform-build-core');
 
 async function ensureSchema(pool){
+  await pool.query(`ALTER TABLE dominance_creatives ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`).catch(()=>{});
   await pool.query(`CREATE TABLE IF NOT EXISTS dominance_creative_provenance(
     id BIGSERIAL PRIMARY KEY,
     account_id BIGINT NOT NULL REFERENCES dominance_accounts(id) ON DELETE CASCADE,
